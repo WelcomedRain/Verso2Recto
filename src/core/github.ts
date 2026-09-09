@@ -74,11 +74,6 @@ export class GitHub {
     return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
   }
 
-  /** Confirms the token works and reports who it belongs to. */
-  async whoAmI(): Promise<{ login: string }> {
-    return this.call('/user');
-  }
-
   async getBranchHead(ref: RepoRef): Promise<{ commitSha: string; treeSha: string }> {
     const r = await this.call<{ object: { sha: string } }>(
       `/repos/${ref.owner}/${ref.repo}/git/ref/heads/${ref.branch}`,

@@ -166,7 +166,10 @@ export function useEditor() {
       const ref: RepoRef = { ...parsed, branch: input.branch || 'main' };
       try {
         const gh = new GitHub(input.token);
-        await gh.whoAmI();
+        // Fetching the branch head is the validity check. Calling /user first
+        // would be a nicer greeting but reaches outside the token's repository
+        // scope, so a correctly-minted single-repo token could fail here before
+        // ever touching the site it is allowed to edit.
         const head = await gh.getBranchHead(ref);
         const tree = await gh.listTree(ref, head.treeSha);
 

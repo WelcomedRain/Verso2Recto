@@ -14,8 +14,15 @@ interface Props {
   onSelectElement: (elementId: string, runOrdinal: number) => void;
   /** Element to highlight when selection comes from the panel, not a click. */
   selectedElementId: string | null;
-  /** Live text pushed into the rendered page as the user types. */
-  liveEdits: { elementId: string; runOrdinal: number; kind: 'text' | 'attr'; attrName?: string; value: string }[];
+  /** Edits pushed into the rendered page as the user types. */
+  liveEdits: {
+    kind: 'text' | 'attr' | 'css-inline' | 'css-theme';
+    elementId: string;
+    runOrdinal: number;
+    attrName?: string;
+    prop?: string;
+    value: string;
+  }[];
 }
 
 export function PageView({ fileText, index, onSelectElement, selectedElementId, liveEdits }: Props) {
@@ -96,12 +103,19 @@ export function PageView({ fileText, index, onSelectElement, selectedElementId, 
     const w = frameRef.current?.contentWindow;
     if (!w) return;
     for (const e of liveEdits) {
-      w.postMessage(
-        e.kind === 'attr'
-          ? { type: 'recto:set-attr', elementId: e.elementId, attrName: e.attrName, value: e.value }
-          : { type: 'recto:set-text', elementId: e.elementId, runOrdinal: e.runOrdinal, value: e.value },
-        '*',
-      );
+      switch (e.kind) {
+        case 'attr':
+          w.postMessage({ type: 'recto:set-attr', elementId: e.elementId, attrName: e.attrName, value: e.value }, '*');
+          break;
+        case 'css-inline':
+          w.postMessage({ type: 'recto:set-style', elementId: e.elementId, prop: e.prop, value: e.value }, '*');
+          break;
+        case 'css-theme':
+          w.postMessage({ type: 'recto:set-theme', prop: e.prop, value: e.value }, '*');
+          break;
+        default:
+          w.postMessage({ type: 'recto:set-text', elementId: e.elementId, runOrdinal: e.runOrdinal, value: e.value }, '*');
+      }
     }
   }, [liveEdits, ready]);
 

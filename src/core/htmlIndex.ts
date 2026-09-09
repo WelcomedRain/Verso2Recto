@@ -49,6 +49,12 @@ export interface ElementNode {
   depth: number;
   /** Sibling index among same-tag siblings, for a readable path. */
   path: string;
+  /**
+   * For raw-text elements (<style>, <script>), the span of their content.
+   * The Theme panel needs it to locate custom properties inside <style>.
+   */
+  rawTextStart?: number;
+  rawTextEnd?: number;
 }
 
 export type StringKind = 'text' | 'attr';
@@ -265,7 +271,9 @@ export function tokenize(src: string): TokenizeResult {
     // Raw-text elements swallow everything up to their close tag.
     if (RAW_TEXT_ELEMENTS.has(tag) && !selfClosing) {
       const close = src.toLowerCase().indexOf(`</${tag}`, openEnd);
-      i = close === -1 ? src.length : close;
+      node.rawTextStart = openEnd;
+      node.rawTextEnd = close === -1 ? src.length : close;
+      i = node.rawTextEnd;
       continue;
     }
 

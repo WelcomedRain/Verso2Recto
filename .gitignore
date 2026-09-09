@@ -4,5 +4,5 @@ dev-dist/
 *.local
 .DS_Store
 
-# A copy of the target site, staged for local testing only.
-public/__sample.html
+# A copy of the target site, kept out of public/ so it never lands in dist.
+__sample.html

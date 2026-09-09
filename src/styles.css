@@ -431,3 +431,25 @@ button:disabled { cursor: default; opacity: 0.4; }
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* Colour swatch beside a style value. The native picker is invisible and
+   stretched over the swatch so the whole square is the hit target. */
+.swatch {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: 1px solid var(--color-divider);
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.swatch input[type='color'] {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  border: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}

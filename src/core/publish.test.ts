@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { verifyHeadTags, editsFor, type PendingChange } from './publish';
 import { parseBundle } from './bundle';
 import { indexTemplate } from './htmlIndex';
+import { buildTargets } from './targets';
 
 const REAL = 'G:/Anthea-Solve/index.html';
 const hasReal = existsSync(REAL);
@@ -63,19 +64,20 @@ describe('editsFor', () => {
   it.skipIf(!hasReal)('maps a change onto the right byte range', () => {
     const b = parseBundle(readFileSync(REAL, 'utf8'));
     const idx = indexTemplate(b.template);
+    const targets = buildTargets(b.template, idx);
     const h1 = idx.strings.find((s) => s.tag === 'h1')!;
     const change: PendingChange = {
-      stringId: h1.id, file: 'index.html', label: h1.label, tag: h1.tag,
+      targetId: h1.id, file: 'index.html', label: h1.label, tag: h1.tag, kind: 'text',
       liveValue: h1.value, nextValue: 'New & improved',
     };
-    const [edit] = editsFor([change], idx.stringsById);
+    const [edit] = editsFor([change], targets.byId);
     expect(edit.start).toBe(h1.start);
     expect(edit.replacement).toBe('New &amp; improved');
   });
 
   it('refuses a change whose position was lost rather than guessing', () => {
     const change: PendingChange = {
-      stringId: 'gone', file: 'index.html', label: 'x', tag: 'p',
+      targetId: 'gone', file: 'index.html', label: 'x', tag: 'p', kind: 'text',
       liveValue: 'a', nextValue: 'b',
     };
     expect(() => editsFor([change], new Map())).toThrow(/position in the page was lost/);

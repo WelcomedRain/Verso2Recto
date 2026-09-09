@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseBundle, listAssets, type Bundle, type AssetInfo } from '../core/bundle';
 import { indexTemplate, type TemplateIndex, type StringEntry } from '../core/htmlIndex';
+import { buildTargets, validate, type EditTarget, type TargetSet } from '../core/targets';
 import { GitHub, parseRepoInput, type RepoRef } from '../core/github';
 import { verifyHeadTags, type PendingChange } from '../core/publish';
 import * as db from '../core/db';
@@ -26,7 +27,16 @@ export interface HealthState {
   headDetail: string;
   stringsIndexed: number;
   imagesFound: number;
-  /** An export replaced the bundle since our patches were authored. */
+  /**
+   * Queued edits that no longer point at anything in the current page.
+   *
+   * This is what an export looks like from in here: a Claude Design re-export
+   * replaces the whole bundle, so byte ranges authored against the old one stop
+   * resolving. Rather than publish a guess or silently drop the work, we count
+   * them and say so.
+   */
+  orphanedChanges: number;
+  /** The bundle changed since the queued edits were authored. */
   exportDetected: boolean;
 }
 
@@ -39,10 +49,11 @@ export interface EditorState {
   activeFile: string | null;
   bundle: Bundle | null;
   index: TemplateIndex | null;
+  targets: TargetSet | null;
   assets: AssetInfo[];
   health: HealthState | null;
   changes: Map<string, PendingChange>;
-  selection: { stringId: string | null; elementId: string | null };
+  selection: { targetId: string | null; elementId: string | null };
   online: boolean;
   lastPush: number | null;
 }
@@ -59,10 +70,11 @@ export function useEditor() {
     activeFile: null,
     bundle: null,
     index: null,
+    targets: null,
     assets: [],
     health: null,
     changes: new Map(),
-    selection: { stringId: null, elementId: null },
+    selection: { targetId: null, elementId: null },
     online: navigator.onLine,
     lastPush: null,
   });
@@ -97,11 +109,17 @@ export function useEditor() {
           db.getMeta<number>('lastPush'),
         ]);
 
+        // Drop records written by an older schema rather than letting an
+        // unkeyed patch inflate the badge and never publish.
         const changes = new Map<string, PendingChange>();
-        for (const p of patches) changes.set(p.stringId, p);
+        for (const p of patches) {
+          if (!p.targetId) { void db.delPatch((p as { id: string }).id); continue; }
+          changes.set(p.targetId, p);
+        }
 
         let bundle: Bundle | null = null;
         let index: TemplateIndex | null = null;
+        let targets: TargetSet | null = null;
         let assets: AssetInfo[] = [];
         let health: HealthState | null = null;
         const activeFile = source?.path ?? null;
@@ -109,7 +127,10 @@ export function useEditor() {
         if (activeFile) {
           const stored = await db.getFile(activeFile);
           if (stored?.text) {
-            ({ bundle, index, assets, health } = openBundle(stored.text));
+            ({ bundle, index, targets, assets, health } = openBundle(stored.text));
+            if (health && targets && bundle) {
+              health = reconcile(health, changes, targets, bundle.template);
+            }
           }
         }
 
@@ -122,6 +143,7 @@ export function useEditor() {
           activeFile,
           bundle,
           index,
+          targets,
           assets,
           health,
           changes,
@@ -182,7 +204,7 @@ export function useEditor() {
           files,
           activeFile: page.path,
           ...opened,
-          selection: { stringId: null, elementId: null },
+          selection: { targetId: null, elementId: null },
         }));
       } catch (e) {
         patch({ error: (e as Error).message });
@@ -212,51 +234,56 @@ export function useEditor() {
 
   /** Record an edit. The pre-edit value is captured once and kept. */
   const edit = useCallback(
-    (stringId: string, nextValue: string) => {
+    (targetId: string, nextValue: string) => {
       setState((s) => {
-        const entry = s.index?.stringsById.get(stringId);
-        if (!entry || !s.source) return s;
+        const target = s.targets?.byId.get(targetId);
+        if (!target || !s.source) return s;
+
+        const problem = validate(target.kind, nextValue);
+        if (problem) return { ...s, error: problem };
+
         const changes = new Map(s.changes);
-        const existing = changes.get(stringId);
-        const liveValue = existing?.liveValue ?? entry.value;
+        const existing = changes.get(targetId);
+        const liveValue = existing?.liveValue ?? target.current;
 
         if (nextValue === liveValue) {
-          changes.delete(stringId);
-          void db.delPatch(stringId);
+          changes.delete(targetId);
+          void db.delPatch(targetId);
         } else {
           const change: PendingChange = {
-            stringId,
+            targetId,
             file: s.source.path,
-            label: entry.label,
-            tag: entry.tag,
+            label: target.label,
+            tag: target.tag,
+            kind: target.kind,
             liveValue,
             nextValue,
           };
-          changes.set(stringId, change);
+          changes.set(targetId, change);
           void db.putPatch({
             ...change,
-            id: stringId,
-            createdAt: existing ? Date.now() : Date.now(),
+            id: targetId,
+            createdAt: Date.now(),
             baseFingerprint: s.bundle ? db.fingerprint(s.bundle.template) : '',
           });
         }
-        return { ...s, changes };
+        return { ...s, error: null, changes };
       });
     },
     [],
   );
 
-  const undo = useCallback((stringId: string) => {
+  const undo = useCallback((targetId: string) => {
     setState((s) => {
       const changes = new Map(s.changes);
-      changes.delete(stringId);
-      void db.delPatch(stringId);
+      changes.delete(targetId);
+      void db.delPatch(targetId);
       return { ...s, changes };
     });
   }, []);
 
-  const select = useCallback((stringId: string | null, elementId: string | null) => {
-    setState((s) => ({ ...s, selection: { stringId, elementId } }));
+  const select = useCallback((targetId: string | null, elementId: string | null) => {
+    setState((s) => ({ ...s, selection: { targetId, elementId } }));
   }, []);
 
   /** After a successful publish the edited values become the new baseline. */
@@ -270,6 +297,19 @@ export function useEditor() {
     });
   }, []);
 
+  /** Forget queued edits that no longer point at anything in the page. */
+  const dropOrphans = useCallback(() => {
+    setState((s) => {
+      if (!s.targets) return s;
+      const changes = new Map(s.changes);
+      for (const [id] of changes) {
+        if (!s.targets.byId.has(id)) { changes.delete(id); void db.delPatch(id); }
+      }
+      const health = s.health ? { ...s.health, orphanedChanges: 0, exportDetected: false } : null;
+      return { ...s, changes, health };
+    });
+  }, []);
+
   const disconnect = useCallback(async () => {
     await db.clearPatches();
     await db.clearFiles();
@@ -278,14 +318,15 @@ export function useEditor() {
     setState((s) => ({
       ...s,
       token: null, source: null, files: [], activeFile: null,
-      bundle: null, index: null, assets: [], health: null,
-      changes: new Map(), selection: { stringId: null, elementId: null },
+      bundle: null, index: null, targets: null, assets: [], health: null,
+      changes: new Map(), selection: { targetId: null, elementId: null },
     }));
   }, []);
 
   /** The values shown in the editor: pending edit if any, else the live value. */
   const valueOf = useCallback(
-    (s: StringEntry) => state.changes.get(s.id)?.nextValue ?? s.value,
+    (s: StringEntry | EditTarget) =>
+      state.changes.get(s.id)?.nextValue ?? ('value' in s ? s.value : s.current),
     [state.changes],
   );
 
@@ -293,25 +334,53 @@ export function useEditor() {
 
   return {
     state, online, manualOffline, setManualOffline,
-    connect, refetch, edit, undo, select, commitPublished, disconnect,
+    connect, refetch, edit, undo, select, commitPublished, disconnect, dropOrphans,
     valueOf, changeList, patch,
   };
 }
 
-function openBundle(text: string): Pick<EditorState, 'bundle' | 'index' | 'assets' | 'health'> {
+/**
+ * Compare the queued edits against the page as it now stands.
+ *
+ * Called on open and after a fetch — the two moments when the bundle can have
+ * been replaced underneath us.
+ */
+function reconcile(
+  health: HealthState,
+  changes: Map<string, PendingChange>,
+  targets: TargetSet,
+  template: string,
+): HealthState {
+  const fp = db.fingerprint(template);
+  let orphaned = 0;
+  let stale = false;
+  for (const c of changes.values()) {
+    if (!targets.byId.has(c.targetId)) orphaned++;
+    const patch = c as Partial<db.StoredPatch>;
+    if (patch.baseFingerprint && patch.baseFingerprint !== fp) stale = true;
+  }
+  return { ...health, orphanedChanges: orphaned, exportDetected: stale && orphaned > 0 };
+}
+
+function openBundle(
+  text: string,
+): Pick<EditorState, 'bundle' | 'index' | 'targets' | 'assets' | 'health'> {
   const bundle = parseBundle(text);
   const index = indexTemplate(bundle.template);
+  const targets = buildTargets(bundle.template, index);
   const assets = listAssets(bundle);
   const head = verifyHeadTags(text);
   return {
     bundle,
     index,
+    targets,
     assets,
     health: {
       headTagsInHead: head.ok,
       headDetail: head.detail,
       stringsIndexed: index.strings.length,
       imagesFound: assets.filter((a) => a.kind === 'image').length,
+      orphanedChanges: 0,
       exportDetected: false,
     },
   };

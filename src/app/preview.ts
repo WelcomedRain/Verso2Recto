@@ -108,6 +108,17 @@ const BRIDGE = String.raw`
       if (t) t.setAttribute(m.attrName, m.value);
     }
 
+    if (m.type === 'recto:set-style') {
+      var se = document.querySelector('[data-recto-id="' + m.elementId + '"]');
+      if (se) se.style.setProperty(m.prop, m.value);
+    }
+
+    if (m.type === 'recto:set-theme') {
+      // An inline custom property on <html> outranks the :root rule, so the
+      // page updates without touching its stylesheet.
+      document.documentElement.style.setProperty(m.prop, m.value);
+    }
+
     if (m.type === 'recto:select-id') {
       var s = document.querySelector('[data-recto-id="' + m.elementId + '"]');
       if (selected) selected.removeAttribute('data-recto-selected');

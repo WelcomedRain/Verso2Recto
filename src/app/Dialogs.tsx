@@ -192,7 +192,7 @@ export function PublishDialog({
 
           <div className="stack" style={{ gap: 10 }}>
             {changes.map((c) => (
-              <div className="change" key={c.stringId}>
+              <div className="change" key={c.targetId}>
                 <div className="head">
                   <span className="label">{c.label}</span>
                   <span className="mono" style={{ fontSize: 11, marginLeft: 'auto', color: 'var(--color-neutral-700)' }}>{c.file}</span>

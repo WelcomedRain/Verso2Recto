@@ -8,7 +8,8 @@
  */
 
 import { parseBundle, serializeBundle, verifyRoundTrip } from './bundle';
-import { applyEdits, encodeAttr, encodeText, type Edit, type StringEntry } from './htmlIndex';
+import { applyEdits, type Edit } from './htmlIndex';
+import { encodeFor, type EditTarget } from './targets';
 import { GitHub, type RepoRef } from './github';
 
 export type StepId = 'written' | 'rebuilt' | 'spliced' | 'verified' | 'pushed';
@@ -30,25 +31,23 @@ export const STEP_LABELS: Record<StepId, string> = {
 };
 
 export interface PendingChange {
-  stringId: string;
+  targetId: string;
   file: string;
   label: string;
   tag: string;
+  /** What kind of thing was edited: words, an inline style, a theme value. */
+  kind: EditTarget['kind'];
   /** The value on the live site, captured before the first edit. */
   liveValue: string;
   nextValue: string;
 }
 
 /** Turn pending changes into byte-range edits against the template. */
-export function editsFor(changes: PendingChange[], index: Map<string, StringEntry>): Edit[] {
+export function editsFor(changes: PendingChange[], targets: Map<string, EditTarget>): Edit[] {
   return changes.map((c) => {
-    const entry = index.get(c.stringId);
-    if (!entry) throw new Error(`Cannot publish "${c.label}": its position in the page was lost.`);
-    return {
-      start: entry.start,
-      end: entry.end,
-      replacement: entry.kind === 'attr' ? encodeAttr(c.nextValue) : encodeText(c.nextValue),
-    };
+    const t = targets.get(c.targetId);
+    if (!t) throw new Error(`Cannot publish "${c.label}": its position in the page was lost.`);
+    return { start: t.start, end: t.end, replacement: encodeFor(t.kind, c.nextValue) };
   });
 }
 
@@ -123,7 +122,7 @@ export interface PublishInput {
   originalFile: string;
   path: string;
   changes: PendingChange[];
-  index: Map<string, StringEntry>;
+  targets: Map<string, EditTarget>;
   message: string;
   online: boolean;
 }
@@ -176,7 +175,7 @@ export async function publish(
   }
   let nextTemplate: string;
   try {
-    nextTemplate = applyEdits(bundle.template, editsFor(input.changes, input.index));
+    nextTemplate = applyEdits(bundle.template, editsFor(input.changes, input.targets));
   } catch (e) {
     return fail('written', (e as Error).message);
   }

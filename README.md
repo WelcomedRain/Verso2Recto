@@ -9,17 +9,22 @@ branch, one button.
 
 ## Status
 
-Milestone 1 (universal click-to-edit copy) is working end to end:
+Copy editing and styling both work end to end:
 
 - Opens a repo over the GitHub REST API and keeps a complete copy in IndexedDB.
 - Renders the real page in an iframe; **every** element is clickable.
 - **199 editable strings** indexed on the target site, against the design
-  prototype's 12 hand-listed ones.
+  prototype's 12 hand-listed ones — plus inline style declarations and theme
+  tokens, for **700+ editable targets** in total.
+- **Style** tab: change one element's own declarations.
+- **Theme** tab: change a `:root` token and everything referencing it moves.
 - Edits update the rendered page live and survive a restart.
 - Publish runs the five-step pipeline with the head-tag verification gate.
+- Queued edits that no longer match the page — what a re-export looks like from
+  in here — are counted and reported rather than silently published or dropped.
 
-Not built yet: styling controls, image replacement, the offline auto-publish
-queue drain, and multi-file editing. See *What's next*.
+Not built yet: image replacement, the offline auto-publish queue drain, and
+multi-file editing. See *What's next*.
 
 ## How it works
 
@@ -54,10 +59,18 @@ passes it straight through, and a click maps back to an exact byte range. The
 tagged document is never written to disk.
 
 **3. The site already has theme tokens.**
-The bundle carries a real `:root` block (`--gold`, `--ink`, `--on-ink`, plus the
+The bundle carries real `:root` blocks (`--gold`, `--ink`, `--on-ink`, plus the
 full Modernist ramp) and elements reference them as `var(--ink)`. Theme editing
-is therefore patching six values, not the bulk find-and-replace the design brief
-assumed.
+is therefore patching a handful of values, not the one-time source surgery or
+34-place find-and-replace the design brief assumed.
+
+**4. Encoding depends on where the value lives.**
+Three contexts, three rules, and using the wrong one corrupts the file quietly.
+Page text is entity-encoded. An inline style value sits inside `style="…"`, so
+it is an attribute value first and CSS second. A theme value sits in `<style>`
+raw text, where entities are *not* decoded — writing `&amp;` there produces a
+literal `&amp;` in the stylesheet. `encodeFor()` holds all three in one place
+with the reasoning attached.
 
 ## The publish gate
 
@@ -87,7 +100,7 @@ Then connect with a **fine-grained** personal access token scoped to
 held in IndexedDB on your device and sent only to `api.github.com`.
 
 ```bash
-npm test          # 25 tests, run against the real antheasolve.com export
+npm test          # 57 tests, run against the real antheasolve.com export
 npm run build
 ```
 
@@ -95,22 +108,43 @@ The tests read `G:/Anthea-Solve/index.html` directly and skip if it is absent.
 That is deliberate: the entire risk here is that the exporter's format differs
 from our model of it, and a synthetic fixture would hide exactly that.
 
+## Styling
+
+Two halves, matching the stated priority of "theme values AND per-element
+override":
+
+- **Theme** — custom properties inside `:root`. One edit, many elements. The
+  site's own seven tokens are shown first; the design system's 48 are behind a
+  disclosure, since changing those reaches further than people expect.
+- **Style** — declarations from the selected element's `style` attribute. The
+  dozen properties people actually reach for are surfaced first, the rest behind
+  "show more". Nothing is hidden, just ordered.
+
+Live preview works by setting the property on the element, or the custom
+property on `<html>` — an inline custom property outranks the `:root` rule, so
+the page updates without its stylesheet being touched.
+
+Values that are computed at runtime (`{{ availabilityText }}`) are shown
+read-only with an explanation, rather than offered as editable and then
+silently overwritten on render.
+
 ## What's next
 
-- **Styling** — a Style tab for the selected element's real declarations, and a
-  Theme panel over the `:root` block. Cheaper than the brief assumed.
 - **Image replacement** — the 6 images are base64 in the manifest, keyed by UUID
   and referenced by bare UUID in the template. Swapping one is a manifest write.
 - **Offline queue drain** — publish while offline currently completes steps 1–4
   and holds; it does not yet publish itself on reconnect.
-- **Export detection** — patches are already stored with a content fingerprint so
-  an export that clobbers the bundle can be detected and re-applied.
+- **Re-applying after an export** — orphaned edits are already detected and
+  reported. Replaying them onto a fresh bundle by matching on content rather
+  than byte offset is the remaining half.
 
 ## Layout
 
 ```
 src/core/bundle.ts      the export format: parse, encode, round-trip proof
 src/core/htmlIndex.ts   byte-exact HTML tokenizer and the string index
+src/core/css.ts         declaration and :root parsing, with byte ranges
+src/core/targets.ts     one address space for words, styles and theme tokens
 src/core/publish.ts     the five steps and the head-tag gate
 src/core/github.ts      REST client — blobs, trees, one commit per publish
 src/core/db.ts          IndexedDB working copy, queue, replayable patches

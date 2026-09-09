@@ -3,6 +3,7 @@ import { useEditor } from './store';
 import { PageView } from './PageView';
 import { CodeView } from './CodeView';
 import { WordsPanel, PicturesPanel, SelectionPanel } from './Panels';
+import { StylePanel, ThemePanel } from './StylePanel';
 import { SourceDialog, ConnectDialog, PublishDialog } from './Dialogs';
 import { FileText, Image as ImageIcon } from './icons';
 import { publish, type Step, type PublishResult } from '../core/publish';
@@ -10,7 +11,7 @@ import * as db from '../core/db';
 import type { StringEntry } from '../core/htmlIndex';
 
 type Mode = 'page' | 'split' | 'code';
-type Tab = 'words' | 'pictures' | 'selection';
+type Tab = 'words' | 'style' | 'theme' | 'pictures' | 'selection';
 
 export function App() {
   const ed = useEditor();
@@ -33,9 +34,15 @@ export function App() {
     void db.getFile(state.activeFile).then((f) => setFileText(f?.text ?? ''));
   }, [state.activeFile, state.bundle]);
 
-  const selectedEntry = state.selection.stringId
-    ? state.index?.stringsById.get(state.selection.stringId) ?? null
+  const selectedEntry = state.selection.targetId
+    ? state.index?.stringsById.get(state.selection.targetId) ?? null
     : null;
+  const selectedElement = state.selection.elementId
+    ? state.index?.byId.get(state.selection.elementId) ?? null
+    : null;
+  const selectedDecls = state.selection.elementId
+    ? state.targets?.declsByElement.get(state.selection.elementId) ?? []
+    : [];
 
   /** A click in the page maps to the first indexed string of that element. */
   const onSelectElement = useCallback((elementId: string, runOrdinal: number) => {
@@ -45,32 +52,35 @@ export function App() {
     const hit = candidates.find((s) => s.runOrdinal === runOrdinal) ?? candidates[0];
     if (hit) {
       ed.select(hit.id, elementId);
-      setTab('selection');
+      // Keep the styling tabs put when the user is working on styling; jumping
+      // them back to Selection on every click makes styling unusable.
+      setTab((t) => (t === 'style' || t === 'theme' ? t : 'selection'));
     } else {
       // The element has no editable words of its own — say so rather than
       // silently doing nothing, which was the prototype's central complaint.
       ed.select(null, elementId);
-      setTab('selection');
+      setTab((t) => (t === 'style' || t === 'theme' ? t : 'selection'));
     }
   }, [ed]);
 
   const liveEdits = useMemo(
     () => ed.changeList.flatMap((c) => {
-      const e = state.index?.stringsById.get(c.stringId);
-      if (!e) return [];
+      const t = state.targets?.byId.get(c.targetId);
+      if (!t) return [];
       return [{
-        elementId: e.elementId,
-        runOrdinal: e.runOrdinal ?? 0,
-        kind: e.kind,
-        attrName: e.attrName,
+        kind: t.kind,
+        elementId: t.elementId ?? '',
+        runOrdinal: t.runOrdinal ?? 0,
+        attrName: t.attrName,
+        prop: t.prop,
         value: c.nextValue,
       }];
     }),
-    [ed.changeList, state.index],
+    [ed.changeList, state.targets],
   );
 
   const doPublish = async () => {
-    if (!state.source || !state.index || !fileText) return;
+    if (!state.source || !state.targets || !fileText) return;
     setPub((p) => ({ ...p, phase: 'running', steps: [], outcome: null, error: null }));
     const result = await publish(
       {
@@ -79,7 +89,7 @@ export function App() {
         originalFile: fileText,
         path: state.source.path,
         changes: ed.changeList,
-        index: state.index.stringsById,
+        targets: state.targets!.byId,
         message: `Update site copy (${ed.changeList.length} change${ed.changeList.length === 1 ? '' : 's'})`,
         online,
       },
@@ -181,6 +191,25 @@ export function App() {
                     : state.health.headDetail}
                 </div>
               </div>
+
+              {state.health.orphanedChanges > 0 && (
+                <div className="card">
+                  <div className="card-title">Edits with nowhere to go</div>
+                  <div className="card-body">
+                    {state.health.orphanedChanges} queued change
+                    {state.health.orphanedChanges === 1 ? '' : 's'} no longer
+                    {state.health.orphanedChanges === 1 ? ' matches' : ' match'} anything on
+                    this page
+                    {state.health.exportDetected
+                      ? ' — the page was replaced by a new export since you made them.'
+                      : '.'}{' '}
+                    They cannot be published.
+                  </div>
+                  <button className="btn btn-primary" onClick={ed.dropOrphans}>
+                    Forget them
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </aside>
@@ -225,8 +254,10 @@ export function App() {
         <aside className="right">
           <div className="tabs">
             <button className={tab === 'words' ? 'on' : ''} onClick={() => setTab('words')}>Words</button>
+            <button className={tab === 'style' ? 'on' : ''} onClick={() => setTab('style')}>Style</button>
+            <button className={tab === 'theme' ? 'on' : ''} onClick={() => setTab('theme')}>Theme</button>
             <button className={tab === 'pictures' ? 'on' : ''} onClick={() => setTab('pictures')}>Pictures</button>
-            <button className={tab === 'selection' ? 'on' : ''} onClick={() => setTab('selection')}>Selection</button>
+            <button className={tab === 'selection' ? 'on' : ''} onClick={() => setTab('selection')}>Sel.</button>
           </div>
 
           {tab === 'words' && idx && (
@@ -236,7 +267,29 @@ export function App() {
               onEdit={ed.edit}
               onFocus={(s: StringEntry) => ed.select(s.id, s.elementId)}
               changes={state.changes}
-              selectedId={state.selection.stringId}
+              selectedId={state.selection.targetId}
+            />
+          )}
+
+          {tab === 'style' && state.targets && (
+            <StylePanel
+              element={selectedElement}
+              decls={selectedDecls}
+              valueOf={ed.valueOf}
+              onEdit={ed.edit}
+              changes={state.changes}
+              targetsById={state.targets.byId}
+              tokens={state.targets.tokens}
+            />
+          )}
+
+          {tab === 'theme' && state.targets && (
+            <ThemePanel
+              valueOf={ed.valueOf}
+              onEdit={ed.edit}
+              changes={state.changes}
+              targetsById={state.targets.byId}
+              tokens={state.targets.tokens}
             />
           )}
 

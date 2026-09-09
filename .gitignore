@@ -6,3 +6,6 @@ dev-dist/
 
 # A copy of the target site, kept out of public/ so it never lands in dist.
 __sample.html
+
+# TypeScript incremental build state.
+*.tsbuildinfo

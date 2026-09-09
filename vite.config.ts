@@ -2,9 +2,19 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
-// Served from https://welcomedrain.github.io/Verso2Recto/ on Pages, and from
-// / during `npm run dev`.
-const base = process.env.GITHUB_ACTIONS ? '/Verso2Recto/' : '/';
+/**
+ * Served from the root of https://recto.antheasolve.com/.
+ *
+ * It previously lived at welcomedrain.github.io/Verso2Recto/, which needed a
+ * '/Verso2Recto/' base. On its own subdomain the app is at the root, so the
+ * base is '/' everywhere — including during `npm run dev`. Getting this wrong
+ * does not fail the build: it deploys a page whose every asset 404s.
+ *
+ * The subdomain is not cosmetic. Browser storage is scoped by host, not by
+ * path, so while this app shared welcomedrain.github.io with another Pages
+ * site, any script on that site could read the GitHub token stored here.
+ */
+const base = '/';
 
 export default defineConfig({
   base,

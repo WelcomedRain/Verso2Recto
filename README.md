@@ -116,3 +116,11 @@ src/core/github.ts      REST client — blobs, trees, one commit per publish
 src/core/db.ts          IndexedDB working copy, queue, replayable patches
 src/app/                the editor UI, built on the Modernist design system
 ```
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — free to use, study and modify for any
+noncommercial purpose; not for sale or for folding into a commercial product.
+See [NOTICE.md](NOTICE.md) for the plain-English version.
+
+Copyright (c) 2026 Gene Bernardin.

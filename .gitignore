@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dev-dist/
+*.local
+.DS_Store
+
+# A copy of the target site, staged for local testing only.
+public/__sample.html

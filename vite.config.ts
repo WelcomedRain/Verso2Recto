@@ -60,7 +60,10 @@ export default defineConfig({
         name: 'RECTO • VERITAS',
         short_name: 'RECTO • VERITAS',
         description: 'Edit a GitHub-hosted site offline, then publish with one button.',
-        theme_color: '#201e1d',
+        // Tints the installed app's title bar. The accent, not the icon
+        // ground — the window frame is the one place the brand colour gets
+        // to be the loudest thing on screen.
+        theme_color: '#ec3013',
         background_color: '#f3f2f2',
         display: 'standalone',
         start_url: base,

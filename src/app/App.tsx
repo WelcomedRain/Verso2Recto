@@ -4,9 +4,10 @@ import { PageView } from './PageView';
 import { CodeView } from './CodeView';
 import { WordsPanel, PicturesPanel, SelectionPanel } from './Panels';
 import { StylePanel, ThemePanel } from './StylePanel';
-import { SourceDialog, ConnectDialog, PublishDialog } from './Dialogs';
+import { SourceDialog, ConnectDialog, PublishDialog, SyncDialog } from './Dialogs';
 import { FileText, Image as ImageIcon } from './icons';
 import { publish, type Step, type PublishResult } from '../core/publish';
+import { verifyDeployment, deployLabel } from '../core/deploy';
 import * as db from '../core/db';
 import type { StringEntry } from '../core/htmlIndex';
 
@@ -22,6 +23,7 @@ export function App() {
   const [showSource, setShowSource] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
 
   const [pub, setPub] = useState<{
     open: boolean; phase: 'review' | 'running' | 'done';
@@ -98,6 +100,15 @@ export function App() {
     setPub((p) => ({ ...p, phase: 'done', outcome: result.outcome, error: result.error ?? null, steps: result.steps }));
     if (result.outcome === 'pushed' && result.fileText) {
       await ed.commitPublished(result.commitSha ?? null, result.fileText);
+      // Observe the deployment rather than assume it. GitHub Pages builds
+      // asynchronously and can fail after a good push.
+      if (state.source?.liveUrl) {
+        void verifyDeployment({
+          liveUrl: state.source.liveUrl,
+          expected: result.fileText,
+          onProgress: ed.setDeploy,
+        }).then(ed.setDeploy);
+      }
     }
   };
 
@@ -335,7 +346,7 @@ export function App() {
         <span>
           {dirty
             ? 'Editing a copy — the live site is untouched'
-            : state.lastPush ? 'Live site rebuilt a moment ago' : 'Working copy matches the live site'}
+            : deployLabel(state.deploy, state.lastPush)}
         </span>
         <span style={{ marginLeft: 'auto' }}>Installed as an app</span>
       </footer>
@@ -345,11 +356,22 @@ export function App() {
         <SourceDialog
           source={state.source}
           lastPush={state.lastPush}
-          onRefetch={() => { setShowSource(false); void ed.refetch(); }}
+          onRefetch={() => { setShowSource(false); void ed.checkRemote(); }}
           onDisconnect={() => { setShowSource(false); void ed.disconnect(); }}
           onClose={() => setShowSource(false)}
         />
       )}
+
+      <SyncDialog
+        sync={state.sync}
+        busy={syncBusy}
+        onKeepLocal={ed.keepLocal}
+        onUseGitHub={async () => {
+          setSyncBusy(true);
+          try { await ed.applyRemote(); } finally { setSyncBusy(false); }
+        }}
+        onClose={ed.dismissSync}
+      />
 
       {pub.open && (
         <PublishDialog
@@ -359,6 +381,7 @@ export function App() {
           outcome={pub.outcome}
           error={pub.error}
           online={online}
+          deploy={state.deploy}
           onPublish={doPublish}
           onClose={() => setPub({ open: false, phase: 'review', steps: [], outcome: null, error: null })}
         />

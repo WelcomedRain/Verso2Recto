@@ -11,6 +11,7 @@ import { indexTemplate, type TemplateIndex, type StringEntry } from '../core/htm
 import { buildTargets, validate, type EditTarget, type TargetSet } from '../core/targets';
 import { GitHub, parseRepoInput, type RepoRef } from '../core/github';
 import { verifyHeadTags, type PendingChange } from '../core/publish';
+import { liveUrlFor, type DeployObservation } from '../core/deploy';
 import * as db from '../core/db';
 
 export type Mode = 'page' | 'split' | 'code';
@@ -40,6 +41,22 @@ export interface HealthState {
   exportDetected: boolean;
 }
 
+/**
+ * What a refresh against GitHub found.
+ *
+ * `decision` is the important one: the working copy has unpublished edits AND
+ * GitHub has moved. Replacing the file underneath those edits would strand
+ * every one of them against byte offsets that no longer exist, so nothing is
+ * applied until the user chooses.
+ */
+export type SyncState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'up-to-date' }
+  | { kind: 'updated'; displaced: boolean }
+  | { kind: 'decision'; remoteSha: string; localSha: string; dirty: number }
+  | { kind: 'error'; message: string };
+
 export interface EditorState {
   ready: boolean;
   error: string | null;
@@ -56,6 +73,8 @@ export interface EditorState {
   selection: { targetId: string | null; elementId: string | null };
   online: boolean;
   lastPush: number | null;
+  sync: SyncState;
+  deploy: DeployObservation | null;
 }
 
 const PAGE_FILE_RE = /\.html?$/i;
@@ -77,6 +96,8 @@ export function useEditor() {
     selection: { targetId: null, elementId: null },
     online: navigator.onLine,
     lastPush: null,
+    sync: { kind: 'idle' },
+    deploy: null,
   });
 
   const patch = useCallback((p: Partial<EditorState>) => {
@@ -111,6 +132,14 @@ export function useEditor() {
 
         // Drop records written by an older schema rather than letting an
         // unkeyed patch inflate the badge and never publish.
+        // Backfill for workspaces saved before the live URL was recorded. The
+        // github.io form redirects to any custom domain and fetch follows it,
+        // so this is correct even for a site on its own domain.
+        const restored = source && !source.liveUrl
+          ? { ...source, liveUrl: liveUrlFor(undefined, source.owner, source.repo, source.path) }
+          : source;
+        if (source && !source.liveUrl && restored) await db.setMeta('source', restored);
+
         const changes = new Map<string, PendingChange>();
         for (const p of patches) {
           if (!p.targetId) { void db.delPatch((p as { id: string }).id); continue; }
@@ -138,7 +167,7 @@ export function useEditor() {
           ...s,
           ready: true,
           token: token ?? null,
-          source: source ?? null,
+          source: restored ?? null,
           files: files ?? [],
           activeFile,
           bundle,
@@ -187,6 +216,14 @@ export function useEditor() {
         const text = await gh.getBlobText(ref, page.sha);
         const opened = openBundle(text);
 
+        // A CNAME in the repository is how GitHub Pages learns the custom
+        // domain, so it is also the most reliable statement of where the
+        // published page will be served from.
+        const cnameEntry = files.find((f) => f.path === 'CNAME');
+        const cname = cnameEntry
+          ? await gh.getBlobText(ref, cnameEntry.sha).catch(() => undefined)
+          : undefined;
+
         await db.clearFiles();
         await db.putFile({ path: page.path, text, sha: page.sha });
         const source: db.StoredSource = {
@@ -194,6 +231,7 @@ export function useEditor() {
           path: page.path,
           lastFetched: Date.now(),
           siteName: parsed.repo,
+          liveUrl: liveUrlFor(cname, ref.owner, ref.repo, page.path),
         };
         await db.setToken(input.token);
         await db.setMeta('source', source);
@@ -216,24 +254,97 @@ export function useEditor() {
     [patch],
   );
 
-  const refetch = useCallback(async () => {
+  /**
+   * Check GitHub without touching the working copy.
+   *
+   * Deliberately split from applying the result. The previous implementation
+   * fetched and overwrote in one step, which silently stranded pending edits
+   * whenever the remote had moved — the exact "never overwrite a changed
+   * working copy without an explicit reviewed choice" failure.
+   */
+  const checkRemote = useCallback(async (): Promise<void> => {
     if (!state.source || !state.token) return;
-    patch({ error: null });
+    if (!online) {
+      patch({ sync: { kind: 'error', message: 'You are offline, so GitHub cannot be checked.' } });
+      return;
+    }
+    patch({ sync: { kind: 'checking' }, error: null });
     try {
       const gh = new GitHub(state.token);
       const head = await gh.getBranchHead(state.source);
       const tree = await gh.listTree(state.source, head.treeSha);
       const page = tree.find((t) => t.path === state.source!.path);
       if (!page) throw new Error('The page file is gone from the repository.');
-      const text = await gh.getBlobText(state.source, page.sha);
-      await db.putFile({ path: page.path, text, sha: page.sha });
-      const source = { ...state.source, lastFetched: Date.now() };
-      await db.setMeta('source', source);
-      setState((s) => ({ ...s, source, ...openBundle(text) }));
+
+      const stored = await db.getFile(state.source.path);
+      const localSha = stored?.sha ?? '';
+      const dirty = state.changes.size;
+
+      if (page.sha === localSha) {
+        patch({ sync: { kind: 'up-to-date' } });
+        return;
+      }
+      if (dirty > 0) {
+        // Remote moved and there is unpublished work. Stop and ask.
+        patch({ sync: { kind: 'decision', remoteSha: page.sha, localSha, dirty } });
+        return;
+      }
+      await applyRemote(page.sha);
+      patch({ sync: { kind: 'updated', displaced: false } });
     } catch (e) {
-      patch({ error: (e as Error).message });
+      patch({ sync: { kind: 'error', message: (e as Error).message } });
     }
-  }, [state.source, state.token, patch]);
+  }, [state.source, state.token, state.changes, online, patch]);
+
+  /**
+   * Replace the working copy with GitHub's version.
+   *
+   * The displaced text is preserved first — the working copy being thrown away
+   * is the only copy of that work, and losing it silently is the thing this
+   * whole path exists to prevent.
+   */
+  const applyRemote = useCallback(async (expectSha?: string) => {
+    if (!state.source || !state.token) return;
+    const gh = new GitHub(state.token);
+    const head = await gh.getBranchHead(state.source);
+    const tree = await gh.listTree(state.source, head.treeSha);
+    const page = tree.find((t) => t.path === state.source!.path);
+    if (!page) throw new Error('The page file is gone from the repository.');
+    if (expectSha && page.sha !== expectSha) {
+      throw new Error('GitHub moved again while you were deciding. Check once more.');
+    }
+
+    const previous = await db.getFile(state.source.path);
+    let displaced = false;
+    if (previous?.text) {
+      await db.putFile({
+        path: `__displaced/${Date.now()}/${state.source.path}`,
+        text: previous.text,
+        sha: previous.sha,
+      });
+      displaced = true;
+    }
+
+    const text = await gh.getBlobText(state.source, page.sha);
+    await db.putFile({ path: page.path, text, sha: page.sha });
+    const source = { ...state.source, lastFetched: Date.now() };
+    await db.setMeta('source', source);
+
+    setState((s) => {
+      const opened = openBundle(text);
+      const health = opened.health && opened.targets
+        ? reconcile(opened.health, s.changes, opened.targets, opened.bundle!.template)
+        : opened.health;
+      return { ...s, source, ...opened, health, sync: { kind: 'updated', displaced } };
+    });
+  }, [state.source, state.token]);
+
+  /** Keep the local working copy. Never schedules a forced remote overwrite. */
+  const keepLocal = useCallback(() => {
+    patch({ sync: { kind: 'idle' } });
+  }, [patch]);
+
+  const dismissSync = useCallback(() => patch({ sync: { kind: 'idle' } }), [patch]);
 
   /** Record an edit. The pre-edit value is captured once and kept. */
   const edit = useCallback(
@@ -296,7 +407,7 @@ export function useEditor() {
     await db.setMeta('lastPush', now);
     setState((s) => {
       if (s.source) void db.putFile({ path: s.source.path, text: fileText, sha: commitSha ?? '' });
-      return { ...s, changes: new Map(), lastPush: now, ...openBundle(fileText) };
+      return { ...s, changes: new Map(), lastPush: now, deploy: null, ...openBundle(fileText) };
     });
   }, []);
 
@@ -313,6 +424,10 @@ export function useEditor() {
     });
   }, []);
 
+  const setDeploy = useCallback((deploy: DeployObservation | null) => {
+    setState((s) => ({ ...s, deploy }));
+  }, []);
+
   const disconnect = useCallback(async () => {
     await db.clearPatches();
     await db.clearFiles();
@@ -322,6 +437,7 @@ export function useEditor() {
       ...s,
       token: null, source: null, files: [], activeFile: null,
       bundle: null, index: null, targets: null, assets: [], health: null,
+      sync: { kind: 'idle' }, deploy: null,
       changes: new Map(), selection: { targetId: null, elementId: null },
     }));
   }, []);
@@ -337,7 +453,8 @@ export function useEditor() {
 
   return {
     state, online, manualOffline, setManualOffline,
-    connect, refetch, edit, undo, select, commitPublished, disconnect, dropOrphans,
+    connect, checkRemote, applyRemote, keepLocal, dismissSync,
+    edit, undo, select, commitPublished, disconnect, dropOrphans, setDeploy,
     valueOf, changeList, patch,
   };
 }

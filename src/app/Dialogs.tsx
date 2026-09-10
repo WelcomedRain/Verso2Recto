@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { StoredSource } from '../core/db';
 import type { PendingChange, Step } from '../core/publish';
+import type { SyncState } from './store';
+import type { DeployObservation } from '../core/deploy';
 
 function Backdrop({ children, onClose, width }: { children: React.ReactNode; onClose: () => void; width: number }) {
   return (
@@ -158,10 +160,89 @@ export function ConnectDialog({
   );
 }
 
+/* -------------------------------- Sync -------------------------------- */
+
+/**
+ * Shown only when GitHub has moved AND there is unpublished work.
+ *
+ * There is deliberately no "merge" here. The page is one compiled file whose
+ * byte offsets shift wholesale on every export, so a three-way merge would be
+ * guesswork dressed up as a feature. Two honest choices beat one dishonest one.
+ */
+export function SyncDialog({
+  sync, onKeepLocal, onUseGitHub, onClose, busy,
+}: {
+  sync: SyncState;
+  onKeepLocal: () => void;
+  onUseGitHub: () => void;
+  onClose: () => void;
+  busy: boolean;
+}) {
+  if (sync.kind === 'idle' || sync.kind === 'checking') return null;
+
+  if (sync.kind === 'decision') {
+    return (
+      <Backdrop onClose={onClose} width={560}>
+        <div className="stack">
+          <div>
+            <h2>GitHub has changed, and so have you</h2>
+            <p style={{ marginTop: 6 }}>
+              The page on GitHub is not the one your working copy came from, and you have{' '}
+              {sync.dirty} unpublished change{sync.dirty === 1 ? '' : 's'}. Nothing has been
+              touched yet.
+            </p>
+          </div>
+
+          <table className="proptable">
+            <tbody>
+              <tr><td className="k">Yours</td><td className="mono" style={{ fontSize: 11 }}>{sync.localSha.slice(0, 10)} · {sync.dirty} edit{sync.dirty === 1 ? '' : 's'}</td></tr>
+              <tr><td className="k">GitHub</td><td className="mono" style={{ fontSize: 11 }}>{sync.remoteSha.slice(0, 10)}</td></tr>
+            </tbody>
+          </table>
+
+          <div className="banner-err">
+            Taking GitHub&rsquo;s version replaces the page your edits were made against, so
+            those edits can no longer be applied. Your current working copy is preserved and
+            stays retrievable, but it will not be published.
+          </div>
+
+          <div className="actions">
+            <button className="btn btn-primary" onClick={onKeepLocal} disabled={busy}>
+              Keep my edits
+            </button>
+            <button className="btn" onClick={onUseGitHub} disabled={busy}>
+              {busy ? 'Fetching…' : 'Take GitHub\u2019s version'}
+            </button>
+          </div>
+        </div>
+      </Backdrop>
+    );
+  }
+
+  const body =
+    sync.kind === 'up-to-date' ? 'Your working copy is based on the current version on GitHub.'
+    : sync.kind === 'updated' ? (sync.displaced
+        ? 'Updated from GitHub. Your previous working copy was preserved.'
+        : 'Updated from GitHub. You had no unpublished changes.')
+    : sync.message;
+
+  return (
+    <Backdrop onClose={onClose} width={460}>
+      <div className="stack">
+        <h2>{sync.kind === 'error' ? 'Could not check GitHub' : 'Up to date'}</h2>
+        {sync.kind === 'error' ? <div className="banner-err">{body}</div> : <p>{body}</p>}
+        <div className="actions">
+          <button className="btn btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </Backdrop>
+  );
+}
+
 /* ------------------------------ Publish ------------------------------ */
 
 export function PublishDialog({
-  phase, changes, steps, outcome, error, online, onPublish, onClose,
+  phase, changes, steps, outcome, error, online, deploy, onPublish, onClose,
 }: {
   phase: 'review' | 'running' | 'done';
   changes: PendingChange[];
@@ -169,6 +250,7 @@ export function PublishDialog({
   outcome: 'pushed' | 'queued' | 'failed' | null;
   error: string | null;
   online: boolean;
+  deploy: DeployObservation | null;
   onPublish: () => void;
   onClose: () => void;
 }) {
@@ -234,7 +316,22 @@ export function PublishDialog({
           )}
 
           {phase === 'done' && outcome === 'pushed' && (
-            <p>GitHub is rebuilding the site now. It usually appears within a minute.</p>
+            <div className="stack" style={{ gap: 8 }}>
+              {/* The push and the deployment are separate facts. Saying the site
+                  is live before observing it is the same lie as claiming a save
+                  that never happened. */}
+              <div className={`step ${deploy?.state === 'verified' ? 'done' : 'active'}`}>
+                <span className="mark" />
+                <span className="txt">
+                  {deploy?.state === 'verified' ? 'The live site is serving your change'
+                    : deploy?.state === 'unknown' ? 'Could not check the live site'
+                    : 'Checking the live site…'}
+                </span>
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
+                {deploy?.detail ?? 'The commit is on GitHub. Watching for the rebuild to appear.'}
+              </p>
+            </div>
           )}
           {phase === 'done' && outcome === 'queued' && (
             <p>Everything is written and checked. It will publish itself when you are back online.</p>

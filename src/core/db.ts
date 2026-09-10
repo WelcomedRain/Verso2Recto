@@ -14,6 +14,14 @@ export interface StoredSource extends RepoRef {
   path: string;
   lastFetched: number | null;
   siteName: string;
+  /**
+   * Where the published page is actually served.
+   *
+   * Read from the repository's CNAME on connect. Without it the app can only
+   * say "pushed"; with it, it can fetch the live page and see for itself
+   * whether the change is being served.
+   */
+  liveUrl: string;
 }
 
 /**

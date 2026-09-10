@@ -139,8 +139,10 @@ export function App() {
       {/* ---------------- header ---------------- */}
       <header className="header">
         <div className="brand">
-          {/* The accent lives inside the name rather than beside it: one mark
-              doing two jobs, separator and brand. */}
+          {/* Monogram then full name. This does not repeat the accent the way a
+              plain red square did — the tile is the same mark in miniature, so
+              it anchors the wordmark instead of competing with it. */}
+          <img className="brand-tile" src="/icon-192.png" alt="" width={26} height={26} />
           <span className="brand-name">
             RECTO<span className="brand-dot">&bull;</span>VERITAS
           </span>

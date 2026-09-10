@@ -132,7 +132,10 @@ button:disabled { cursor: default; opacity: 0.4; }
   border-bottom: 2px solid var(--color-divider);
 }
 
-.brand { display: flex; align-items: center; gap: 8px; }
+.brand { display: flex; align-items: center; gap: 9px; flex: none; }
+/* 26px against a 56px bar: enough to read as a mark, not so much that it
+   crowds the row. No radius — nothing in this system is rounded. */
+.brand-tile { display: block; flex: none; }
 .brand-name {
   font-family: var(--font-heading);
   font-weight: 800;
@@ -157,6 +160,17 @@ button:disabled { cursor: default; opacity: 0.4; }
   padding: 4px 6px;
   text-align: left;
   display: block;
+  /* The header is a fixed 56px row. Wrapping here does not reflow the bar, it
+     overflows it — so these truncate instead, and only once space really runs
+     out. */
+  min-width: 0;
+  overflow: hidden;
+}
+.source-btn .site,
+.source-btn .where {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .source-btn:hover { background: var(--hover); border-color: var(--color-divider); }
 .source-btn .site { font-family: var(--font-heading); font-weight: 800; font-size: 13px; }

@@ -57,8 +57,8 @@ export default defineConfig({
       registerType: 'prompt',
       includeAssets: ['favicon-32.png'],
       manifest: {
-        name: 'RectoVeritas',
-        short_name: 'RectoVeritas',
+        name: 'RECTO • VERITAS',
+        short_name: 'RECTO • VERITAS',
         description: 'Edit a GitHub-hosted site offline, then publish with one button.',
         theme_color: '#201e1d',
         background_color: '#f3f2f2',

@@ -6,6 +6,7 @@ import {
 } from './preview';
 import type { TemplateIndex } from '../core/htmlIndex';
 import type { TargetKind } from '../core/targets';
+import type { FitMeasurement } from '../core/fit';
 
 interface Props {
   file: string;
@@ -26,6 +27,11 @@ interface Props {
   /** Selectors to test against the selected element, in rule order. */
   matchSelectors: string[];
   onRulesMatched: (elementId: string, matches: { index: number; count: number }[]) => void;
+  /** Image element to measure in its frame, if one is selected. */
+  measureFitFor: string | null;
+  /** elementId -> the asset id its markup references, for re-resolution. */
+  assetRefs: Record<string, string>;
+  onFitMeasured: (m: FitMeasurement) => void;
   /** Edits pushed into the rendered page as the user types. */
   liveEdits: {
     kind: TargetKind;
@@ -39,7 +45,7 @@ interface Props {
 
 export function PageView({
   fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover,
-  matchSelectors, onRulesMatched,
+  matchSelectors, onRulesMatched, measureFitFor, onFitMeasured, assetRefs,
 }: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
@@ -101,6 +107,9 @@ export function PageView({
       if (!m || typeof m !== 'object') return;
       if (m.type === 'recto:ready') setReady(true);
       if (m.type === 'recto:select') onSelectElement(m.elementId, m.runOrdinal);
+      if ((m as { type: string }).type === 'recto:fit-measured') {
+        onFitMeasured(m as unknown as FitMeasurement);
+      }
       if ((m as { type: string }).type === 'recto:rules-matched') {
         const r = m as unknown as { elementId: string; matches: { index: number; count: number }[] };
         onRulesMatched(r.elementId, r.matches);
@@ -108,7 +117,14 @@ export function PageView({
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [onSelectElement, onRulesMatched]);
+  }, [onSelectElement, onRulesMatched, onFitMeasured]);
+
+  useEffect(() => {
+    if (!ready || !measureFitFor) return;
+    frameRef.current?.contentWindow?.postMessage(
+      { type: 'recto:measure-fit', elementId: measureFitFor }, '*',
+    );
+  }, [ready, measureFitFor, liveEdits]);
 
   // Ask the page which rules govern the selected element. Only the browser can
   // answer that; the editor knows the markup, not the resolved cascade.
@@ -133,7 +149,7 @@ export function PageView({
           w.postMessage({ type: 'recto:set-style', elementId: e.elementId, prop: e.prop, value: e.value }, '*');
           break;
         case 'html':
-          w.postMessage({ type: 'recto:set-html', elementId: e.elementId, html: e.value }, '*');
+          w.postMessage({ type: 'recto:set-html', elementId: e.elementId, html: e.value, assetRefs }, '*');
           break;
         case 'css-hover':
           // Nothing to push: the runtime already consumed style-hover, so the
@@ -147,7 +163,7 @@ export function PageView({
           w.postMessage({ type: 'recto:set-text', elementId: e.elementId, runOrdinal: e.runOrdinal, value: e.value }, '*');
       }
     }
-  }, [liveEdits, ready]);
+  }, [liveEdits, ready, assetRefs]);
 
   useEffect(() => {
     if (!ready) return;

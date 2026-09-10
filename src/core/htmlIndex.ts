@@ -453,6 +453,11 @@ export function applyEdits(src: string, edits: Edit[]): string {
  * click-to-select possible at all.
  */
 export function tagForPreview(src: string, index: TemplateIndex): string {
+  // Only the id. There is deliberately no attempt to stash the asset reference
+  // alongside it: measured against the live bundle, the runtime resolves an
+  // asset id in *any* attribute, not just `src`, so a copy of it is rewritten
+  // to a blob URL exactly like the original. The mapping is supplied by the
+  // editor instead, which still holds the source.
   const edits: Edit[] = index.elements.map((el) => ({
     start: el.attrInsertAt,
     end: el.attrInsertAt,

@@ -127,6 +127,27 @@ const BRIDGE = String.raw`
     // preview: it applies the declarations inline and remembers what to
     // restore.
 
+    if (m.type === 'recto:measure-fit') {
+      // How an image actually sits in its frame can only be measured, not
+      // inferred: the frame is laid out by the cascade, and its width here is
+      // fluid.
+      var fi = document.querySelector('[data-recto-id="' + m.elementId + '"]');
+      if (!fi || fi.tagName !== 'IMG') return;
+      var box = fi.parentElement;
+      var ir = fi.getBoundingClientRect();
+      var br = box ? box.getBoundingClientRect() : ir;
+      var cs = getComputedStyle(fi);
+      parent.postMessage({
+        type: 'recto:fit-measured',
+        elementId: m.elementId,
+        intrinsic: [fi.naturalWidth, fi.naturalHeight],
+        rendered: [Math.round(ir.width), Math.round(ir.height)],
+        frame: [Math.round(br.width), Math.round(br.height)],
+        objectFit: cs.objectFit,
+        frameOverflow: box ? getComputedStyle(box).overflow : 'visible'
+      }, '*');
+    }
+
     if (m.type === 'recto:match-rules') {
       // Selector matching has to happen against the real DOM: the editor knows
       // the markup but not what the browser resolved it to.
@@ -155,6 +176,27 @@ const BRIDGE = String.raw`
       // replaced. Its children are new markup and get no ids until reload,
       // which is honest: they are not the nodes the index knows about.
       repl.setAttribute('data-recto-id', m.elementId);
+
+      // Fresh markup carries the source's bare asset ids, which the browser
+      // cannot load — the runtime swapped them for blob URLs when it rendered,
+      // and it does that in any attribute, so the id cannot be stashed in the
+      // markup either. The editor sends elementId -> assetId; pairing that with
+      // what each element currently shows gives assetId -> blob URL.
+      var resolved = {};
+      var refs = m.assetRefs || {};
+      for (var key in refs) {
+        var holder = document.querySelector('[data-recto-id="' + key + '"]');
+        var live = holder && holder.getAttribute('src');
+        if (live && live.indexOf(':') !== -1) resolved[refs[key]] = live;
+      }
+      var candidates = repl.tagName === 'IMG' ? [repl] : [];
+      var inner = repl.querySelectorAll ? repl.querySelectorAll('img') : [];
+      for (var ii = 0; ii < inner.length; ii++) candidates.push(inner[ii]);
+      for (var ci = 0; ci < candidates.length; ci++) {
+        var cur = candidates[ci].getAttribute('src');
+        if (cur && resolved[cur]) candidates[ci].setAttribute('src', resolved[cur]);
+      }
+
       ht.replaceWith(repl);
       if (selected && !selected.isConnected) selected = repl;
     }

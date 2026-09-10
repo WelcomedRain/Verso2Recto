@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { AssetInfo, Bundle } from '../core/bundle';
 import { assetDataUrl } from '../core/bundle';
 import { imageSizeFromBase64, formatSize } from '../core/imageMeta';
+import type { FitReport } from '../core/fit';
 import { useRef, useState } from 'react';
 import type { ElementNode, StringEntry, TemplateIndex } from '../core/htmlIndex';
 import type { PendingChange } from '../core/publish';
@@ -56,6 +57,7 @@ export function WordsPanel({
 
 export function PicturesPanel({
   assets, bundle, selectedUuid, onSelect, onReplace, usedByElement,
+  fit, onMakeItFill, onShowCode,
 }: {
   assets: AssetInfo[];
   bundle: Bundle;
@@ -64,6 +66,9 @@ export function PicturesPanel({
   onReplace: (uuid: string, file: File) => Promise<{ ok: boolean; message: string }>;
   /** Element id in the page that shows this image, when there is one. */
   usedByElement: (uuid: string) => string | null;
+  fit: FitReport | null;
+  onMakeItFill: () => void;
+  onShowCode: () => void;
 }) {
   const images = useMemo(() => assets.filter((a) => a.kind === 'image'), [assets]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -132,14 +137,50 @@ export function PicturesPanel({
               </span>
             </button>
             {on && (
-              <button
-                className="btn btn-primary"
-                style={{ fontSize: 11, padding: '5px 9px' }}
-                disabled={busy === a.uuid}
-                onClick={() => pick(a.uuid)}
-              >
-                {busy === a.uuid ? 'Replacing…' : 'Replace'}
-              </button>
+              <div className="stack" style={{ gap: 8, flex: '1 1 100%' }}>
+                {fit && (
+                  <div className={fit.verdict === 'fills' ? 'was' : 'card'}>
+                    <div className="card-title" style={{ marginBottom: 4 }}>In the page</div>
+                    <div className="card-body">
+                      <b>{fit.headline}</b>
+                      <div style={{ marginTop: 4 }}>{fit.detail}</div>
+                      {!fit.cropsAutomatically && fit.suggested && (
+                        <div style={{ marginTop: 6 }}>
+                          To match the frame at this window width, supply about{' '}
+                          <span className="mono">{fit.suggested[0]} × {fit.suggested[1]}</span>.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: 11, padding: '5px 9px' }}
+                    disabled={busy === a.uuid}
+                    onClick={() => pick(a.uuid)}
+                  >
+                    {busy === a.uuid ? 'Replacing…' : 'Replace'}
+                  </button>
+                  {fit && !fit.cropsAutomatically && (
+                    <button
+                      className="btn"
+                      style={{ fontSize: 11, padding: '5px 9px' }}
+                      onClick={onMakeItFill}
+                      title="Set the frame to crop, so any image fills it at every width"
+                    >
+                      Make it fill the frame
+                    </button>
+                  )}
+                  <button
+                    className="btn"
+                    style={{ fontSize: 11, padding: '5px 9px' }}
+                    onClick={onShowCode}
+                  >
+                    Show me the code
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         );

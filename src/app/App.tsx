@@ -12,6 +12,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import * as db from '../core/db';
 import { outerRange, type StringEntry } from '../core/htmlIndex';
 import type { TargetKind } from '../core/targets';
+import { reportFit, makeItCover, type FitMeasurement } from '../core/fit';
 
 /** One change, in the shape the preview bridge wants. */
 interface LiveEdit {
@@ -162,6 +163,46 @@ export function App() {
       // panel to change, and leaving it on top buries the rule that is.
       .sort((a, b) => a.count - b.count);
   }, [ruleMatches, matchedFor, state.selection.elementId, state.targets]);
+
+  /**
+   * How the selected image sits in its frame.
+   *
+   * Measured rather than computed: the frame is laid out by the cascade and is
+   * fluid here, so the editor cannot know its size without asking the page.
+   */
+  const [fit, setFit] = useState<FitMeasurement | null>(null);
+  const selectedImageElement = selectedAsset ? imageElementFor(selectedAsset) : null;
+  useEffect(() => { setFit(null); }, [selectedImageElement]);
+  const fitReport = useMemo(
+    () => (fit && fit.elementId === selectedImageElement ? reportFit(fit) : null),
+    [fit, selectedImageElement],
+  );
+
+  /** Rewrite the selected image's tag so it fills its frame at any width. */
+  const makeImageFill = useCallback(() => {
+    if (!selectedImageElement || !state.index || !state.bundle) return;
+    const el = state.index.byId.get(selectedImageElement);
+    if (!el) return;
+    const { start, end } = outerRange(el);
+    const next = makeItCover(state.bundle.template.slice(start, end));
+    if (next) ed.editElementHtml(selectedImageElement, next);
+  }, [selectedImageElement, state.index, state.bundle, ed]);
+
+  /**
+   * Which asset each element references in the source.
+   *
+   * The preview needs this to put an image back after its markup is replaced:
+   * the runtime resolves asset ids to blob URLs as it renders, and does so in
+   * any attribute, so the id survives nowhere in the DOM.
+   */
+  const assetRefs = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const el of state.index?.elements ?? []) {
+      const src = el.attrs.find((a) => a.name === 'src')?.value;
+      if (src && state.bundle?.manifest[src]) out[el.id] = src;
+    }
+    return out;
+  }, [state.index, state.bundle]);
 
   const forceHover = useMemo(
     () => (hoverHeld && state.selection.elementId
@@ -426,6 +467,9 @@ export function App() {
                 forceHover={forceHover}
                 matchSelectors={matchSelectors}
                 onRulesMatched={onRulesMatched}
+                measureFitFor={selectedImageElement}
+                onFitMeasured={setFit}
+                assetRefs={assetRefs}
               />
             )}
             {mode !== 'page' && state.bundle && (
@@ -502,6 +546,13 @@ export function App() {
                 return ed.replaceImage(uuid, buf, file.type || 'image/png');
               }}
               usedByElement={imageElementFor}
+              fit={fitReport}
+              onMakeItFill={makeImageFill}
+              onShowCode={() => {
+                if (selectedImageElement) ed.select(null, selectedImageElement);
+                setMode('split');
+                setTab('selection');
+              }}
             />
           )}
 

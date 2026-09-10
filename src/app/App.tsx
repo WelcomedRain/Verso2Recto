@@ -251,6 +251,9 @@ export function App() {
     <div className={`shell ${wco ? 'wco' : ''}`}>
       {/* The title bar we draw ourselves when the window gives us one. */}
       <div className="titlebar">
+        {/* The overlay replaces the window's own caption, icon included, so the
+            icon has to be drawn here or it simply disappears. */}
+        <img className="tile" src="/icon-192.png" alt="" width={20} height={20} />
         <span className="mark">
           RECTO<span className="brand-dot">&bull;</span>VERITAS
         </span>

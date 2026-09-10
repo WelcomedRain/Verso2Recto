@@ -557,5 +557,12 @@ button:disabled { cursor: default; opacity: 0.4; }
    goes monochrome white here rather than losing its middle. */
 .shell.wco .titlebar .mark .brand-dot { color: #fff; }
 
-/* The in-app header keeps everything except the brand, which has moved up. */
-.shell.wco .header .brand { display: none; }
+/* The header keeps its full lockup. Before the overlay, the window drew an
+   icon and a name of its own above the app's own header — so showing both is
+   what was already there, not new duplication. */
+.shell.wco .titlebar .tile {
+  width: 20px;
+  height: 20px;
+  display: block;
+  flex: none;
+}

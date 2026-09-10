@@ -193,10 +193,15 @@ export function App() {
     const el = state.index.byId.get(selectedImageElement);
     if (!el) return;
     const { start, end } = outerRange(el);
-    const src = state.bundle.template.slice(start, end);
+    // Transform what is currently queued, not the original. Otherwise
+    // switching back to the original fitting is a no-op: the rewrite compares
+    // against source that already has it, decides nothing would change, and
+    // silently does nothing.
+    const pending = state.changes.get(`html:${selectedImageElement}`)?.nextValue;
+    const src = pending ?? state.bundle.template.slice(start, end);
     const next = how === 'cover' ? makeItCover(src) : makeItFitByHeight(src);
     if (next) ed.editElementHtml(selectedImageElement, next);
-  }, [selectedImageElement, state.index, state.bundle, ed]);
+  }, [selectedImageElement, state.index, state.bundle, state.changes, ed]);
 
   /**
    * Which asset each element references in the source.
@@ -212,6 +217,31 @@ export function App() {
       if (src && state.bundle?.manifest[src]) out[el.id] = src;
     }
     return out;
+  }, [state.index, state.bundle]);
+
+  /**
+   * The background of the box an image sits in.
+   *
+   * It is what shows when an image is narrower than its frame, so anyone
+   * deliberately supplying a narrower image needs to set it to blend. It
+   * belongs to the parent element, which is awkward to select by clicking —
+   * the image is on top of it — so it is surfaced beside the image instead.
+   */
+  const frameBackgroundTarget = useMemo(() => {
+    if (!selectedImageElement || !state.index || !state.targets) return null;
+    const img = state.index.byId.get(selectedImageElement);
+    const parent = img?.parentId ? state.index.byId.get(img.parentId) : null;
+    if (!parent) return null;
+    const decls = state.targets.declsByElement.get(parent.id) ?? [];
+    const bg = decls.find((d) => d.prop === 'background' || d.prop === 'background-color');
+    return bg ? state.targets.byId.get(bg.id) ?? null : null;
+  }, [selectedImageElement, state.index, state.targets]);
+
+  const originalHtmlFor = useCallback((elementId: string): string | null => {
+    const el = state.index?.byId.get(elementId);
+    if (!el || !state.bundle) return null;
+    const { start, end } = outerRange(el);
+    return state.bundle.template.slice(start, end);
   }, [state.index, state.bundle]);
 
   const forceHover = useMemo(
@@ -482,6 +512,7 @@ export function App() {
                 assetRefs={assetRefs}
                 sweepFor={sweepFor}
                 onSwept={onSwept}
+                originalHtmlFor={originalHtmlFor}
               />
             )}
             {mode !== 'page' && state.bundle && (
@@ -562,6 +593,11 @@ export function App() {
               sweeping={sweepFor !== null}
               onCheckWidths={() => selectedImageElement && setSweepFor(selectedImageElement)}
               onSetFit={setImageFit}
+              backgroundTarget={frameBackgroundTarget}
+              backgroundValue={frameBackgroundTarget ? ed.valueOf(frameBackgroundTarget) : ''}
+              backgroundEdited={!!frameBackgroundTarget && state.changes.has(frameBackgroundTarget.id)}
+              tokens={state.targets?.tokens ?? []}
+              onEditBackground={(v) => frameBackgroundTarget && ed.edit(frameBackgroundTarget.id, v)}
               onShowCode={() => {
                 if (selectedImageElement) ed.select(null, selectedImageElement);
                 setMode('split');

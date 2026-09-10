@@ -36,6 +36,25 @@ describe('reportFit, anchored by height', () => {
     expect(r.requiredAspect).toBe(2.83);
   });
 
+  it('reports the box to cover, in the terms someone preparing a file needs', () => {
+    const r = reportFit(base, realSweep);
+    // Fixed height, fluid width — so one height and a maximum width.
+    expect(r.frameHeightRange).toEqual([190, 190]);
+    expect(r.frameWidthRange).toEqual([301, 537]);
+    expect(r.detail).toMatch(/always 190px tall/);
+    expect(r.detail).toMatch(/reaches 537px wide/);
+    // And the rule that works for any height they pick.
+    expect(r.detail).toMatch(/that height × 2\.83/);
+  });
+
+  it('says the height varies when it actually does', () => {
+    const varying = [
+      { viewport: 390, frameW: 336, frameH: 150 },
+      { viewport: 1280, frameW: 537, frameH: 190 },
+    ];
+    expect(reportFit(base, varying).detail).toMatch(/between 150px and 190px tall/);
+  });
+
   it('says how much of the width is safe for the subject', () => {
     const r = reportFit(base, realSweep);
     // Narrowest 1.58 against widest 2.83 — only the middle ~56% is ever shown.

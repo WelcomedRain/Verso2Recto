@@ -28,7 +28,7 @@ interface Common {
 }
 
 /** A colour swatch that opens the native picker, beside a free-text field. */
-function ValueField({
+export function ValueField({
   target, value, edited, tokens, onEdit,
 }: {
   target: EditTarget;

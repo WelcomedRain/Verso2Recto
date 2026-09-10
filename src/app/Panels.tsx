@@ -8,7 +8,7 @@ import type { ElementNode, StringEntry, TemplateIndex } from '../core/htmlIndex'
 import type { PendingChange } from '../core/publish';
 import type { EditTarget } from '../core/targets';
 import type { StyleDecl, ThemeToken } from '../core/css';
-import { StyleSections, type MatchedRule } from './StylePanel';
+import { StyleSections, ValueField, type MatchedRule } from './StylePanel';
 import { ElementCodeEditor } from './CodeEditor';
 
 /* ------------------------------- Words ------------------------------- */
@@ -58,6 +58,7 @@ export function WordsPanel({
 export function PicturesPanel({
   assets, bundle, selectedUuid, onSelect, onReplace, usedByElement,
   fit, sweeping, onCheckWidths, onSetFit, onShowCode,
+  backgroundTarget, backgroundValue, backgroundEdited, tokens, onEditBackground,
 }: {
   assets: AssetInfo[];
   bundle: Bundle;
@@ -71,6 +72,11 @@ export function PicturesPanel({
   onCheckWidths: () => void;
   onSetFit: (how: 'cover' | 'height') => void;
   onShowCode: () => void;
+  backgroundTarget: EditTarget | null;
+  backgroundValue: string;
+  backgroundEdited: boolean;
+  tokens: ThemeToken[];
+  onEditBackground: (v: string) => void;
 }) {
   const images = useMemo(() => assets.filter((a) => a.kind === 'image'), [assets]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -169,6 +175,27 @@ export function PicturesPanel({
                     </div>
                   </div>
                 )}
+                {backgroundTarget && (
+                  <div className="field">
+                    <div className="field-head">
+                      <span className="label">Behind it</span>
+                      {backgroundEdited && (
+                        <span className="tag" style={{ color: 'var(--color-accent-700)' }}>edited</span>
+                      )}
+                    </div>
+                    <ValueField
+                      target={backgroundTarget}
+                      value={backgroundValue}
+                      edited={backgroundEdited}
+                      tokens={tokens}
+                      onEdit={onEditBackground}
+                    />
+                    <div className="empty" style={{ marginTop: 2 }}>
+                      What shows either side when the image is narrower than its frame.
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button
                     className="btn btn-primary"

@@ -52,6 +52,9 @@ export interface FitReport {
   suggested: [number, number] | null;
   /** Fraction of the image's width that is visible at the tightest frame. */
   safeCentreFraction: number | null;
+  /** Smallest and largest the frame ever gets, across the widths measured. */
+  frameWidthRange: [number, number] | null;
+  frameHeightRange: [number, number] | null;
   sweep: SweepPoint[];
 }
 
@@ -87,7 +90,7 @@ export function reportFit(m: FitMeasurement, sweep: SweepPoint[] = []): FitRepor
   const blank: FitReport = {
     verdict: 'unknown', anchor: 'contain', frameAspect: 0, imageAspect: 0,
     gapEachSide: 0, gapTopBottom: 0, requiredAspect: null, suggested: null,
-    safeCentreFraction: null, sweep,
+    safeCentreFraction: null, frameWidthRange: null, frameHeightRange: null, sweep,
     headline: 'Could not measure this image in the page.',
     detail: 'It may not be visible at the current width.',
   };
@@ -107,7 +110,15 @@ export function reportFit(m: FitMeasurement, sweep: SweepPoint[] = []): FitRepor
   const widestAspect = r2(Math.max(...aspects));
   const narrowestAspect = r2(Math.min(...aspects));
 
-  const base = { frameAspect, imageAspect, gapEachSide, gapTopBottom, anchor, sweep };
+  const widths = sweep.length ? sweep.map((p) => p.frameW) : [fw];
+  const heights = sweep.length ? sweep.map((p) => p.frameH) : [fh];
+  const frameWidthRange: [number, number] = [Math.min(...widths), Math.max(...widths)];
+  const frameHeightRange: [number, number] = [Math.min(...heights), Math.max(...heights)];
+
+  const base = {
+    frameAspect, imageAspect, gapEachSide, gapTopBottom, anchor, sweep,
+    frameWidthRange, frameHeightRange,
+  };
 
   if (anchor === 'cover') {
     // Worst vertical loss across the measured widths.
@@ -141,11 +152,21 @@ export function reportFit(m: FitMeasurement, sweep: SweepPoint[] = []): FitRepor
     const safeCentreFraction = r2(narrowestAspect / requiredAspect);
     const fillsEverywhere = imageAspect >= requiredAspect - 0.01;
 
+    // Expressed as the numbers someone preparing a file actually needs: the
+    // box it must cover, and the rule for any height they choose.
+    const [minH, maxH] = frameHeightRange;
+    const [, maxW] = frameWidthRange;
+    const heightPhrase = minH === maxH
+      ? `always ${maxH}px tall`
+      : `between ${minH}px and ${maxH}px tall`;
+
     const shared =
-      `The image is anchored by height, so its full height always shows and only the ` +
-      `sides are trimmed. Across the widths measured the frame ranges from ` +
-      `${narrowestAspect}:1 to ${widestAspect}:1, so an image of at least ` +
-      `${requiredAspect}:1 never leaves a gap. Keep the subject inside the middle ` +
+      `Anchored by height, so the full height always shows and only the sides are ` +
+      `trimmed. Across the widths measured the frame is ${heightPhrase} and reaches ` +
+      `${maxW}px wide — a ratio of ${requiredAspect}:1 at its widest, against ` +
+      `${narrowestAspect}:1 at its narrowest. ` +
+      `For any height you choose, make the image at least that height × ${requiredAspect} ` +
+      `wide and it can never leave a bar. Keep the subject inside the middle ` +
       `${Math.round(safeCentreFraction * 100)}% of the width — that is all that shows ` +
       `when the frame is at its narrowest.`;
 

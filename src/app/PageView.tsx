@@ -34,6 +34,8 @@ interface Props {
   onSwept: (points: SweepPoint[]) => void;
   /** elementId -> the asset id its markup references, for re-resolution. */
   assetRefs: Record<string, string>;
+  /** The unedited markup for an element, to put back when an edit is undone. */
+  originalHtmlFor: (elementId: string) => string | null;
   onFitMeasured: (m: FitMeasurement) => void;
   /** Edits pushed into the rendered page as the user types. */
   liveEdits: {
@@ -49,7 +51,7 @@ interface Props {
 export function PageView({
   fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover,
   matchSelectors, onRulesMatched, measureFitFor, onFitMeasured, assetRefs,
-  sweepFor, onSwept,
+  sweepFor, onSwept, originalHtmlFor,
 }: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
@@ -125,9 +127,15 @@ export function PageView({
 
   useEffect(() => {
     if (!ready || !measureFitFor) return;
-    frameRef.current?.contentWindow?.postMessage(
-      { type: 'recto:measure-fit', elementId: measureFitFor }, '*',
-    );
+    // Deferred: a change to the fit arrives as a markup replacement in the same
+    // tick, and measuring immediately reads the node that is about to be
+    // replaced — so the panel would keep describing the previous state.
+    const t = setTimeout(() => {
+      frameRef.current?.contentWindow?.postMessage(
+        { type: 'recto:measure-fit', elementId: measureFitFor }, '*',
+      );
+    }, 120);
+    return () => clearTimeout(t);
   }, [ready, measureFitFor, liveEdits]);
 
   // Ask the page which rules govern the selected element. Only the browser can
@@ -138,6 +146,15 @@ export function PageView({
       { type: 'recto:match-rules', elementId: selectedElementId, selectors: matchSelectors }, '*',
     );
   }, [ready, selectedElementId, matchSelectors]);
+
+  /**
+   * Elements whose markup we have replaced in the preview.
+   *
+   * Needed because undoing a code edit sends nothing: the bridge only ever
+   * hears about changes that exist. Without this the page keeps showing markup
+   * the working copy no longer contains.
+   */
+  const replaced = useRef<Set<string>>(new Set());
 
   // Push edits into the rendered page as they are typed.
   useEffect(() => {
@@ -153,6 +170,7 @@ export function PageView({
           w.postMessage({ type: 'recto:set-style', elementId: e.elementId, prop: e.prop, value: e.value }, '*');
           break;
         case 'html':
+          replaced.current.add(e.elementId);
           w.postMessage({ type: 'recto:set-html', elementId: e.elementId, html: e.value, assetRefs }, '*');
           break;
         case 'css-hover':
@@ -167,7 +185,17 @@ export function PageView({
           w.postMessage({ type: 'recto:set-text', elementId: e.elementId, runOrdinal: e.runOrdinal, value: e.value }, '*');
       }
     }
-  }, [liveEdits, ready, assetRefs]);
+    // Anything we replaced that is no longer edited goes back to its source.
+    const live = new Set(liveEdits.filter((e) => e.kind === 'html').map((e) => e.elementId));
+    for (const id of [...replaced.current]) {
+      if (live.has(id)) continue;
+      const original = originalHtmlFor(id);
+      replaced.current.delete(id);
+      if (original) {
+        w.postMessage({ type: 'recto:set-html', elementId: id, html: original, assetRefs }, '*');
+      }
+    }
+  }, [liveEdits, ready, assetRefs, originalHtmlFor]);
 
   useEffect(() => {
     if (!ready) return;

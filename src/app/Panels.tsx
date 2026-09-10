@@ -57,7 +57,7 @@ export function WordsPanel({
 
 export function PicturesPanel({
   assets, bundle, selectedUuid, onSelect, onReplace, usedByElement,
-  fit, onMakeItFill, onShowCode,
+  fit, sweeping, onCheckWidths, onSetFit, onShowCode,
 }: {
   assets: AssetInfo[];
   bundle: Bundle;
@@ -67,7 +67,9 @@ export function PicturesPanel({
   /** Element id in the page that shows this image, when there is one. */
   usedByElement: (uuid: string) => string | null;
   fit: FitReport | null;
-  onMakeItFill: () => void;
+  sweeping: boolean;
+  onCheckWidths: () => void;
+  onSetFit: (how: 'cover' | 'height') => void;
   onShowCode: () => void;
 }) {
   const images = useMemo(() => assets.filter((a) => a.kind === 'image'), [assets]);
@@ -144,10 +146,24 @@ export function PicturesPanel({
                     <div className="card-body">
                       <b>{fit.headline}</b>
                       <div style={{ marginTop: 4 }}>{fit.detail}</div>
-                      {!fit.cropsAutomatically && fit.suggested && (
+                      {fit.suggested && (
                         <div style={{ marginTop: 6 }}>
-                          To match the frame at this window width, supply about{' '}
-                          <span className="mono">{fit.suggested[0]} × {fit.suggested[1]}</span>.
+                          Supply about{' '}
+                          <span className="mono">{fit.suggested[0]} × {fit.suggested[1]}</span>
+                          {fit.requiredAspect ? ` (${fit.requiredAspect}:1) or wider.` : '.'}
+                        </div>
+                      )}
+                      {fit.sweep.length === 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          Measured at this window width only.{' '}
+                          <button
+                            className="btn btn-ghost"
+                            style={{ fontSize: 11, padding: '2px 6px' }}
+                            onClick={onCheckWidths}
+                            disabled={sweeping}
+                          >
+                            {sweeping ? 'Checking…' : 'Check every width'}
+                          </button>
                         </div>
                       )}
                     </div>
@@ -162,14 +178,24 @@ export function PicturesPanel({
                   >
                     {busy === a.uuid ? 'Replacing…' : 'Replace'}
                   </button>
-                  {fit && !fit.cropsAutomatically && (
+                  {fit && fit.anchor !== 'height' && (
                     <button
                       className="btn"
                       style={{ fontSize: 11, padding: '5px 9px' }}
-                      onClick={onMakeItFill}
-                      title="Set the frame to crop, so any image fills it at every width"
+                      onClick={() => onSetFit('height')}
+                      title="Show the whole height at every width and trim only the sides"
                     >
-                      Make it fill the frame
+                      Fit by height
+                    </button>
+                  )}
+                  {fit && fit.anchor !== 'cover' && (
+                    <button
+                      className="btn"
+                      style={{ fontSize: 11, padding: '5px 9px' }}
+                      onClick={() => onSetFit('cover')}
+                      title="Fill at any proportion, trimming whichever side overflows"
+                    >
+                      Fill and crop
                     </button>
                   )}
                   <button

@@ -144,6 +144,11 @@ const BRIDGE = String.raw`
         rendered: [Math.round(ir.width), Math.round(ir.height)],
         frame: [Math.round(br.width), Math.round(br.height)],
         objectFit: cs.objectFit,
+        // The *specified* sizing, not the used pixels. When an image happens to
+        // fill its frame exactly, the geometry cannot say whether it is
+        // anchored by height, by width, or stretched — but the declaration can.
+        inlineWidth: fi.style.width || '',
+        inlineHeight: fi.style.height || '',
         frameOverflow: box ? getComputedStyle(box).overflow : 'visible'
       }, '*');
     }

@@ -1,132 +1,190 @@
 /**
  * How an image sits in the frame the page gives it.
  *
- * The question this answers is "what size should the replacement be?", which
- * has no answer from the image alone. The frame is laid out by the cascade and
- * is usually fluid, so the only honest source is a measurement of the rendered
- * page — and the useful advice is about the *ratio*, not a pixel size.
+ * The question is "what should the replacement be?", which the image alone
+ * cannot answer: the frame is laid out by the cascade and is usually fluid, so
+ * the useful advice is about ratio, not pixels — and it depends on how the
+ * image is anchored in its frame.
+ *
+ * That anchoring distinction is the whole point of this file. A frame with a
+ * fixed height and a fluid width, holding an image at `height:100%;width:auto`,
+ * shows the image's full height at every window width and trims the sides. That
+ * is a guarantee worth keeping: it is what lets someone crop a photograph so a
+ * face is framed correctly and trust that it stays framed. `object-fit:cover`
+ * throws that guarantee away — it crops whichever axis overflows, and on a
+ * fixed-height frame the vertical crop grows as the window widens.
  */
 
 export interface FitMeasurement {
   elementId: string;
-  /** The image's own pixel dimensions. */
   intrinsic: [number, number];
-  /** How large it is drawn. */
   rendered: [number, number];
-  /** The box it is drawn inside. */
   frame: [number, number];
   objectFit: string;
+  /** The declared width/height, e.g. `auto` or `100%`. */
+  inlineWidth?: string;
+  inlineHeight?: string;
   frameOverflow: string;
 }
 
+/** The frame measured at a range of window widths. */
+export interface SweepPoint {
+  viewport: number;
+  frameW: number;
+  frameH: number;
+}
+
+export type FitAnchor = 'height' | 'width' | 'cover' | 'contain' | 'stretched';
 export type FitVerdict = 'fills' | 'gaps' | 'crops' | 'unknown';
 
 export interface FitReport {
   verdict: FitVerdict;
-  /** Ratio the frame wants, at the width it is currently laid out. */
+  anchor: FitAnchor;
   frameAspect: number;
   imageAspect: number;
-  /** Empty space either side, or hidden overflow, in CSS pixels. */
   gapEachSide: number;
   gapTopBottom: number;
   headline: string;
   detail: string;
-  /** A concrete size to supply, at 2x for sharpness. */
+  /** Ratio the image must be at least, to never leave a gap. */
+  requiredAspect: number | null;
+  /** A concrete size to supply. */
   suggested: [number, number] | null;
-  /** True when the frame crops, so a mismatched ratio is harmless. */
-  cropsAutomatically: boolean;
+  /** Fraction of the image's width that is visible at the tightest frame. */
+  safeCentreFraction: number | null;
+  sweep: SweepPoint[];
 }
 
-const round = (n: number) => Math.round(n * 100) / 100;
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
-export function reportFit(m: FitMeasurement): FitReport {
+function detectAnchor(m: FitMeasurement): FitAnchor {
+  if (m.objectFit === 'cover') return 'cover';
+  if (m.objectFit === 'contain') return 'contain';
+
+  // Prefer what was declared. Geometry cannot distinguish an image anchored by
+  // height that happens to fill from one that is stretched, and the difference
+  // decides whether the advice is about ratio or not.
+  const w = (m.inlineWidth ?? '').trim();
+  const h = (m.inlineHeight ?? '').trim();
+  if (h && h !== 'auto' && (w === 'auto' || !w)) return 'height';
+  if (w && w !== 'auto' && (h === 'auto' || !h)) return 'width';
+
+  const [rw, rh] = m.rendered;
+  const [fw, fh] = m.frame;
+  const heightMatches = Math.abs(rh - fh) <= 2;
+  const widthMatches = Math.abs(rw - fw) <= 2;
+  if (heightMatches && widthMatches) return 'stretched';
+  if (heightMatches) return 'height';
+  if (widthMatches) return 'width';
+  return 'contain';
+}
+
+export function reportFit(m: FitMeasurement, sweep: SweepPoint[] = []): FitReport {
   const [iw, ih] = m.intrinsic;
   const [rw, rh] = m.rendered;
   const [fw, fh] = m.frame;
 
-  if (!iw || !ih || !fw || !fh) {
-    return {
-      verdict: 'unknown', frameAspect: 0, imageAspect: 0,
-      gapEachSide: 0, gapTopBottom: 0, suggested: null, cropsAutomatically: false,
-      headline: 'Could not measure this image in the page.',
-      detail: 'It may not be visible at the current width.',
-    };
-  }
+  const blank: FitReport = {
+    verdict: 'unknown', anchor: 'contain', frameAspect: 0, imageAspect: 0,
+    gapEachSide: 0, gapTopBottom: 0, requiredAspect: null, suggested: null,
+    safeCentreFraction: null, sweep,
+    headline: 'Could not measure this image in the page.',
+    detail: 'It may not be visible at the current width.',
+  };
+  if (!iw || !ih || !fw || !fh) return blank;
 
-  const frameAspect = round(fw / fh);
-  const imageAspect = round(iw / ih);
+  const frameAspect = r2(fw / fh);
+  const imageAspect = r2(iw / ih);
   const gapEachSide = Math.round((fw - rw) / 2);
   const gapTopBottom = Math.round((fh - rh) / 2);
+  const anchor = detectAnchor(m);
 
-  // `cover` scales to fill and crops the excess, so the supplied ratio stops
-  // mattering — which is the whole point of recommending it.
-  const cropsAutomatically = m.objectFit === 'cover';
+  // Across every width measured, the widest and narrowest shapes the frame
+  // takes. Without this the advice is only true at the current window size.
+  const aspects = sweep.length
+    ? sweep.map((p) => p.frameW / p.frameH)
+    : [fw / fh];
+  const widestAspect = r2(Math.max(...aspects));
+  const narrowestAspect = r2(Math.min(...aspects));
 
-  // Twice the frame's current width keeps it sharp on a high-density display,
-  // and gives room for the frame growing at other window widths.
-  const suggested: [number, number] = [
-    Math.round(fw * 2),
-    Math.round(fw * 2 / frameAspect),
-  ];
+  const base = { frameAspect, imageAspect, gapEachSide, gapTopBottom, anchor, sweep };
 
-  if (cropsAutomatically) {
+  if (anchor === 'cover') {
+    // Worst vertical loss across the measured widths.
+    const worst = sweep.reduce((acc, p) => {
+      const scale = Math.max(p.frameW / iw, p.frameH / ih);
+      return Math.max(acc, Math.round(ih * scale) - p.frameH);
+    }, 0);
     return {
-      verdict: 'fills', frameAspect, imageAspect, gapEachSide, gapTopBottom,
-      suggested, cropsAutomatically,
-      headline: 'Fills the frame at any shape.',
-      detail:
-        'The frame is set to crop, so a replacement of any proportion fills it — ' +
-        'only keep the subject near the middle, since the edges may be trimmed.',
+      ...base,
+      verdict: 'fills',
+      requiredAspect: null,
+      suggested: [Math.round(fw * 2), Math.round((fw * 2) / frameAspect)],
+      safeCentreFraction: null,
+      headline: 'Fills the frame at any shape — but crops top and bottom.',
+      detail: worst
+        ? `Because the frame keeps a fixed height while its width changes, the amount ` +
+          `trimmed off the top and bottom grows with the window: up to ${worst}px at the ` +
+          `widths measured. If the top of the subject matters, fitting by height instead ` +
+          `keeps the full height at every width and trims only the sides.`
+        : 'Any proportion fills it. Keep the subject near the middle, since the edges ' +
+          'may be trimmed.',
     };
   }
 
-  if (gapEachSide > 2 || gapTopBottom > 2) {
-    const dim = gapEachSide > gapTopBottom ? 'either side' : 'above and below';
-    const gap = Math.max(gapEachSide, gapTopBottom);
-    return {
-      verdict: 'gaps', frameAspect, imageAspect, gapEachSide, gapTopBottom,
-      suggested, cropsAutomatically,
-      headline: `Leaves ${gap}px of background ${dim}.`,
-      detail:
-        `The frame wants ${frameAspect}:1 at this window width and the image is ` +
-        `${imageAspect}:1. Because the frame is fluid, no single ratio fills it at ` +
-        'every width — setting the frame to crop is the reliable fix.',
-    };
-  }
+  if (anchor === 'height') {
+    // Height is guaranteed; only the sides are ever trimmed. So the image just
+    // has to be at least as wide-shaped as the widest the frame ever gets.
+    const requiredAspect = r2(widestAspect);
+    const suggestedH = Math.round(fh * 2);
+    const suggested: [number, number] = [Math.round(suggestedH * requiredAspect), suggestedH];
+    const safeCentreFraction = r2(narrowestAspect / requiredAspect);
+    const fillsEverywhere = imageAspect >= requiredAspect - 0.01;
 
-  if (rw > fw + 2 || rh > fh + 2) {
+    const shared =
+      `The image is anchored by height, so its full height always shows and only the ` +
+      `sides are trimmed. Across the widths measured the frame ranges from ` +
+      `${narrowestAspect}:1 to ${widestAspect}:1, so an image of at least ` +
+      `${requiredAspect}:1 never leaves a gap. Keep the subject inside the middle ` +
+      `${Math.round(safeCentreFraction * 100)}% of the width — that is all that shows ` +
+      `when the frame is at its narrowest.`;
+
+    if (fillsEverywhere && gapEachSide <= 2) {
+      return {
+        ...base, verdict: 'fills', requiredAspect, suggested, safeCentreFraction,
+        headline: 'Fills the frame, and its full height always shows.',
+        detail: shared,
+      };
+    }
     return {
-      verdict: 'crops', frameAspect, imageAspect, gapEachSide, gapTopBottom,
-      suggested, cropsAutomatically,
-      headline: 'Wider than its frame, so the sides are trimmed.',
-      detail:
-        `The frame is ${frameAspect}:1 here and the image is ${imageAspect}:1. ` +
-        'It fills, but keep anything important away from the left and right edges.',
+      ...base,
+      verdict: gapEachSide > 2 ? 'gaps' : 'crops',
+      requiredAspect, suggested, safeCentreFraction,
+      headline: gapEachSide > 2
+        ? `Leaves ${gapEachSide}px of background either side.`
+        : 'Wider than its frame, so the sides are trimmed.',
+      detail: shared,
     };
   }
 
   return {
-    verdict: 'fills', frameAspect, imageAspect, gapEachSide, gapTopBottom,
-    suggested, cropsAutomatically,
-    headline: 'Fits its frame at this width.',
-    detail:
-      'The frame is fluid, so this can change at other window widths. Setting the ' +
-      'frame to crop makes it fill at every width regardless of the image ratio.',
+    ...base,
+    verdict: gapEachSide > 2 || gapTopBottom > 2 ? 'gaps' : 'fills',
+    requiredAspect: null,
+    suggested: [Math.round(fw * 2), Math.round((fw * 2) / frameAspect)],
+    safeCentreFraction: null,
+    headline: gapEachSide > 2 || gapTopBottom > 2
+      ? 'Does not fill its frame.'
+      : 'Fits its frame at this width.',
+    detail: `The frame is ${frameAspect}:1 here and the image is ${imageAspect}:1.`,
   };
 }
 
-/**
- * Rewrite an `<img>` tag so it fills its frame at any window width.
- *
- * `object-fit: cover` is the standard answer to "make this image fill a box of
- * unknown proportion": the browser scales it to cover and trims the excess, so
- * the supplied ratio stops mattering. Returns null when the tag is already set
- * up that way, so the UI can avoid offering a change that does nothing.
- */
-export function makeItCover(imgHtml: string): string | null {
+type Rewrite = (imgHtml: string) => string | null;
+
+function rewriteImgStyle(imgHtml: string, next: string[]): string | null {
   const m = imgHtml.match(/^(<img\b)([^>]*?)(\/?>)$/is);
   if (!m) return null;
-
   const [, open, attrs, close] = m;
   const styleMatch = attrs.match(/\sstyle\s*=\s*("([^"]*)"|'([^']*)')/i);
   const existing = styleMatch ? (styleMatch[2] ?? styleMatch[3] ?? '') : '';
@@ -137,9 +195,27 @@ export function makeItCover(imgHtml: string): string | null {
     .filter(Boolean)
     .filter((d) => !/^(width|height|object-fit)\s*:/i.test(d));
 
-  const next = ['width:100%', 'height:100%', 'object-fit:cover', ...keep].join(';');
-  if (existing.replace(/\s/g, '') === next.replace(/\s/g, '')) return null;
+  const style = [...next, ...keep].join(';');
+  if (existing.replace(/\s/g, '') === style.replace(/\s/g, '')) return null;
 
   const withoutStyle = styleMatch ? attrs.replace(styleMatch[0], '') : attrs;
-  return `${open}${withoutStyle.trimEnd()} style="${next}"${close}`;
+  return `${open}${withoutStyle.trimEnd()} style="${style}"${close}`;
 }
+
+/**
+ * Fill the frame at any proportion, cropping whichever axis overflows.
+ *
+ * Right when the frame's shape is stable, or when nothing in the image is
+ * positionally important. Wrong when the frame has a fixed height and a fluid
+ * width and the subject must stay framed — see the note at the top.
+ */
+export const makeItCover: Rewrite = (html) =>
+  rewriteImgStyle(html, ['width:100%', 'height:100%', 'object-fit:cover']);
+
+/**
+ * Anchor by height: show the whole height always, trim the sides as needed.
+ *
+ * The right default for a fixed-height frame, and what this site already used.
+ */
+export const makeItFitByHeight: Rewrite = (html) =>
+  rewriteImgStyle(html, ['height:100%', 'width:auto']);

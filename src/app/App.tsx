@@ -12,7 +12,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import * as db from '../core/db';
 import { outerRange, type StringEntry } from '../core/htmlIndex';
 import type { TargetKind } from '../core/targets';
-import { reportFit, makeItCover, type FitMeasurement } from '../core/fit';
+import { reportFit, makeItCover, makeItFitByHeight, type FitMeasurement, type SweepPoint } from '../core/fit';
 
 /** One change, in the shape the preview bridge wants. */
 interface LiveEdit {
@@ -171,20 +171,30 @@ export function App() {
    * fluid here, so the editor cannot know its size without asking the page.
    */
   const [fit, setFit] = useState<FitMeasurement | null>(null);
+  const [sweep, setSweep] = useState<SweepPoint[]>([]);
+  const [sweepFor, setSweepFor] = useState<string | null>(null);
   const selectedImageElement = selectedAsset ? imageElementFor(selectedAsset) : null;
-  useEffect(() => { setFit(null); }, [selectedImageElement]);
+
+  useEffect(() => { setFit(null); setSweep([]); setSweepFor(null); }, [selectedImageElement]);
+
+  const onSwept = useCallback((points: SweepPoint[]) => {
+    setSweep(points);
+    setSweepFor(null);
+  }, []);
+
   const fitReport = useMemo(
-    () => (fit && fit.elementId === selectedImageElement ? reportFit(fit) : null),
-    [fit, selectedImageElement],
+    () => (fit && fit.elementId === selectedImageElement ? reportFit(fit, sweep) : null),
+    [fit, sweep, selectedImageElement],
   );
 
-  /** Rewrite the selected image's tag so it fills its frame at any width. */
-  const makeImageFill = useCallback(() => {
+  /** Rewrite the selected image's tag with one of the two fitting rules. */
+  const setImageFit = useCallback((how: 'cover' | 'height') => {
     if (!selectedImageElement || !state.index || !state.bundle) return;
     const el = state.index.byId.get(selectedImageElement);
     if (!el) return;
     const { start, end } = outerRange(el);
-    const next = makeItCover(state.bundle.template.slice(start, end));
+    const src = state.bundle.template.slice(start, end);
+    const next = how === 'cover' ? makeItCover(src) : makeItFitByHeight(src);
     if (next) ed.editElementHtml(selectedImageElement, next);
   }, [selectedImageElement, state.index, state.bundle, ed]);
 
@@ -470,6 +480,8 @@ export function App() {
                 measureFitFor={selectedImageElement}
                 onFitMeasured={setFit}
                 assetRefs={assetRefs}
+                sweepFor={sweepFor}
+                onSwept={onSwept}
               />
             )}
             {mode !== 'page' && state.bundle && (
@@ -547,7 +559,9 @@ export function App() {
               }}
               usedByElement={imageElementFor}
               fit={fitReport}
-              onMakeItFill={makeImageFill}
+              sweeping={sweepFor !== null}
+              onCheckWidths={() => selectedImageElement && setSweepFor(selectedImageElement)}
+              onSetFit={setImageFit}
               onShowCode={() => {
                 if (selectedImageElement) ed.select(null, selectedImageElement);
                 setMode('split');

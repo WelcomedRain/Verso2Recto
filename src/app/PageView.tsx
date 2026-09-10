@@ -6,7 +6,7 @@ import {
 } from './preview';
 import type { TemplateIndex } from '../core/htmlIndex';
 import type { TargetKind } from '../core/targets';
-import type { FitMeasurement } from '../core/fit';
+import type { FitMeasurement, SweepPoint } from '../core/fit';
 
 interface Props {
   file: string;
@@ -29,6 +29,9 @@ interface Props {
   onRulesMatched: (elementId: string, matches: { index: number; count: number }[]) => void;
   /** Image element to measure in its frame, if one is selected. */
   measureFitFor: string | null;
+  /** Set to an element id to measure its frame across a range of widths. */
+  sweepFor: string | null;
+  onSwept: (points: SweepPoint[]) => void;
   /** elementId -> the asset id its markup references, for re-resolution. */
   assetRefs: Record<string, string>;
   onFitMeasured: (m: FitMeasurement) => void;
@@ -46,6 +49,7 @@ interface Props {
 export function PageView({
   fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover,
   matchSelectors, onRulesMatched, measureFitFor, onFitMeasured, assetRefs,
+  sweepFor, onSwept,
 }: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
@@ -178,6 +182,43 @@ export function PageView({
       { type: 'recto:select-id', elementId: selectedElementId }, '*',
     );
   }, [selectedElementId, ready]);
+
+  /**
+   * Measure the frame at a range of window widths.
+   *
+   * Advice about proportion is only true at the width it was measured at, and
+   * this frame's shape swings from 1.58:1 to 2.83:1 as the window moves. The
+   * only way to know that is to lay the page out at each width and look.
+   *
+   * Timers rather than requestAnimationFrame: a hidden or backgrounded pane
+   * throttles rAF to nothing and the sweep would hang forever.
+   */
+  useEffect(() => {
+    if (!ready || !sweepFor) return;
+    let cancelled = false;
+    const el = frameRef.current;
+    if (!el) return;
+    const previous = el.style.width;
+
+    (async () => {
+      const points: SweepPoint[] = [];
+      for (const viewport of [390, 500, 600, 700, 834, 1000, 1280, 1440]) {
+        if (cancelled) break;
+        el.style.width = `${viewport}px`;
+        await new Promise((r) => setTimeout(r, 90));
+        const doc = el.contentDocument;
+        const node = doc?.querySelector(`[data-recto-id="${sweepFor}"]`);
+        const box = node?.parentElement?.getBoundingClientRect();
+        if (box && box.width) {
+          points.push({ viewport, frameW: Math.round(box.width), frameH: Math.round(box.height) });
+        }
+      }
+      el.style.width = previous;
+      if (!cancelled) onSwept(points);
+    })();
+
+    return () => { cancelled = true; el.style.width = previous; };
+  }, [ready, sweepFor, onSwept]);
 
   const stepZoom = (dir: 1 | -1) => {
     const cur = effectiveZoom;

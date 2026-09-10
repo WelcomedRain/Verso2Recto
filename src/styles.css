@@ -378,6 +378,14 @@ button:disabled { cursor: default; opacity: 0.4; }
   font-weight: 800;
   font-size: 12px;
   text-transform: uppercase;
+  /* Five equal-width tabs, so the longest label sets the pressure. Truncating
+     is not a fix for a label that is too long — it is a guard so a future one
+     degrades visibly instead of running edge to edge. */
+  min-width: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tabs button.on { background: var(--color-text); color: var(--color-bg); }
 .tabs button:not(.on):hover { background: var(--hover-strong); }

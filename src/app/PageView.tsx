@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Tablet, Smartphone, ZoomIn, ZoomOut } from './icons';
 import {
-  buildPreviewDoc, DEVICE_WIDTH, ZOOM_STEPS, fillZoom,
+  buildPreviewDoc, DEVICE_WIDTH, ZOOM_STEPS, frameSizing,
   type Device, type PreviewMessage,
 } from './preview';
 import type { TemplateIndex } from '../core/htmlIndex';
@@ -61,22 +61,16 @@ export function PageView({ fileText, index, onSelectElement, selectedElementId, 
     return () => ro.disconnect();
   }, []);
 
-  const effectiveZoom = zoom === 'fill' ? fillZoom(pane.w, deviceW) : zoom;
+  const sizing = frameSizing(device, zoom, pane.w, pane.h);
+  const effectiveZoom = sizing.scale;
 
-  // When the pane is wider than the device in Fill mode, let the page reflow at
-  // 1:1 instead of capping it at the device width.
-  const fillIsWider = zoom === 'fill' && pane.w >= deviceW;
-
-  const frameStyle: React.CSSProperties = fillIsWider
-    ? { width: '100%', height: Math.max(240, pane.h) }
-    : {
-        width: deviceW,
-        // The frame fills the pane's height so the page scrolls inside it,
-        // like a browser window, rather than the pane scrolling the frame.
-        height: Math.max(240, pane.h / (effectiveZoom || 1)),
-        transform: `scale(${effectiveZoom})`,
-        transformOrigin: 'top left',
-      };
+  const frameStyle: React.CSSProperties = {
+    width: sizing.width,
+    height: sizing.height,
+    ...(sizing.width === '100%'
+      ? {}
+      : { transform: `scale(${sizing.scale})`, transformOrigin: 'top left' }),
+  };
 
   const srcDoc = useMemo(
     () => (fileText ? buildPreviewDoc(fileText, index) : ''),

@@ -311,8 +311,8 @@ export function App() {
             <button className={tab === 'words' ? 'on' : ''} onClick={() => setTab('words')}>Words</button>
             <button className={tab === 'style' ? 'on' : ''} onClick={() => setTab('style')}>Style</button>
             <button className={tab === 'theme' ? 'on' : ''} onClick={() => setTab('theme')}>Theme</button>
-            <button className={tab === 'pictures' ? 'on' : ''} onClick={() => setTab('pictures')}>Pictures</button>
-            <button className={tab === 'selection' ? 'on' : ''} onClick={() => setTab('selection')}>Sel.</button>
+            <button className={tab === 'pictures' ? 'on' : ''} onClick={() => setTab('pictures')}>Images</button>
+            <button className={tab === 'selection' ? 'on' : ''} onClick={() => setTab('selection')}>Select</button>
           </div>
 
           {tab === 'words' && idx && (

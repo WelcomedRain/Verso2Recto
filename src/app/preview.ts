@@ -201,3 +201,43 @@ export function fillZoom(paneWidth: number, deviceWidth: number): number {
   if (paneWidth <= 0) return 1;
   return Math.min(1, Math.max(0.08, paneWidth / deviceWidth));
 }
+
+export interface FrameSizing {
+  /** CSS width for the iframe. */
+  width: number | '100%';
+  height: number;
+  scale: number;
+}
+
+/**
+ * Work out how large to draw the page.
+ *
+ * Extracted and pure because the interesting rule here is easy to get wrong and
+ * impossible to see when it is: letting the pane's width override the chosen
+ * device silently disabled the Tablet and Phone buttons entirely, since a
+ * ~460px pane is wider than a 390px phone.
+ *
+ * Choosing a device is a statement about how wide the page should be, so it
+ * always wins. Only Desktop stretches to fill a pane wider than itself, which
+ * is what stops a wide window showing a 1280px page marooned in dead space.
+ */
+export function frameSizing(
+  device: Device,
+  zoom: number | 'fill',
+  paneW: number,
+  paneH: number,
+): FrameSizing {
+  const deviceW = DEVICE_WIDTH[device];
+  const scale = zoom === 'fill' ? fillZoom(paneW, deviceW) : zoom;
+
+  if (device === 'desktop' && zoom === 'fill' && paneW >= deviceW) {
+    return { width: '100%', height: Math.max(240, paneH), scale: 1 };
+  }
+  return {
+    width: deviceW,
+    // The frame fills the pane's height so the page scrolls inside it, like a
+    // browser window, rather than the pane scrolling the frame.
+    height: Math.max(240, paneH / (scale || 1)),
+    scale,
+  };
+}

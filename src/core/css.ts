@@ -174,17 +174,50 @@ export function findThemeTokens(template: string, index: TemplateIndex): ThemeTo
 export interface StyleDecl extends Declaration {
   id: string;
   elementId: string;
+  /** Which attribute the declaration came from. */
+  state: 'base' | 'hover';
+}
+
+/**
+ * `style-hover` is not a web standard — it is the Claude Design runtime's own
+ * attribute, applied on pointer enter. It is a plain declaration list like
+ * `style`, so it parses identically and patches identically.
+ *
+ * It matters more than its twelve occurrences suggest: a hover colour is a
+ * change people expect to be able to make, and an editor that cannot see the
+ * attribute cannot even explain why it is refusing.
+ */
+export const HOVER_ATTR = 'style-hover';
+
+function declsFromAttr(
+  el: ElementNode,
+  attrName: string,
+  state: StyleDecl['state'],
+  idPrefix: string,
+): StyleDecl[] {
+  const attr = el.attrs.find((a) => a.name === attrName);
+  if (!attr || !attr.value.trim()) return [];
+  return parseDeclarations(attr.value, attr.valueStart).map((d, i) => ({
+    ...d,
+    id: `${idPrefix}:${el.id}:${i}`,
+    elementId: el.id,
+    state,
+  }));
 }
 
 /** Declarations from one element's `style` attribute. */
 export function elementStyle(el: ElementNode): StyleDecl[] {
-  const attr = el.attrs.find((a) => a.name === 'style');
-  if (!attr || !attr.value.trim()) return [];
-  return parseDeclarations(attr.value, attr.valueStart).map((d, i) => ({
-    ...d,
-    id: `d:${el.id}:${i}`,
-    elementId: el.id,
-  }));
+  return declsFromAttr(el, 'style', 'base', 'd');
+}
+
+/** Declarations from one element's `style-hover` attribute. */
+export function elementHoverStyle(el: ElementNode): StyleDecl[] {
+  return declsFromAttr(el, HOVER_ATTR, 'hover', 'h');
+}
+
+/** Does this element change appearance on hover? */
+export function hasHoverStyle(el: ElementNode): boolean {
+  return elementHoverStyle(el).length > 0;
 }
 
 /** Does this element have a `style` attribute at all? */

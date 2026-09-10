@@ -70,8 +70,15 @@ function ValueField({
 /* -------------------------------- Style ------------------------------- */
 
 export function StylePanel({
-  element, decls, valueOf, onEdit, changes, targetsById, tokens,
-}: Common & { element: ElementNode | null; decls: StyleDecl[] }) {
+  element, decls, hoverDecls, valueOf, onEdit, changes, targetsById, tokens,
+  hoverHeld, onHoldHover,
+}: Common & {
+  element: ElementNode | null;
+  decls: StyleDecl[];
+  hoverDecls: StyleDecl[];
+  hoverHeld: boolean;
+  onHoldHover: (hold: boolean) => void;
+}) {
   const [showAll, setShowAll] = useState(false);
 
   const { featured, rest } = useMemo(() => {
@@ -92,7 +99,7 @@ export function StylePanel({
     );
   }
 
-  if (!decls.length) {
+  if (!decls.length && !hoverDecls.length) {
     return (
       <div className="panel">
         <div className="label">{element.tag}</div>
@@ -131,6 +138,27 @@ export function StylePanel({
       </div>
 
       {featured.map(row)}
+
+      {hoverDecls.length > 0 && (
+        <div className="stack" style={{ gap: 8, borderTop: '2px solid var(--color-divider)', paddingTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="label">On hover</span>
+            <button
+              className={`btn ${hoverHeld ? 'btn-primary' : ''}`}
+              style={{ marginLeft: 'auto', fontSize: 11, padding: '4px 8px' }}
+              onClick={() => onHoldHover(!hoverHeld)}
+            >
+              {hoverHeld ? 'Release' : 'Show it'}
+            </button>
+          </div>
+          <div className="empty" style={{ marginTop: -2 }}>
+            {hoverHeld
+              ? 'Held in its hover appearance so you can see what you are changing.'
+              : 'What this element looks like when the pointer is over it.'}
+          </div>
+          {hoverDecls.map(row)}
+        </div>
+      )}
 
       {rest.length > 0 && (
         <>

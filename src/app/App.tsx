@@ -25,6 +25,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [hoverHeld, setHoverHeld] = useState(false);
 
   // A new build is fetched in the background but never applied underneath an
   // edit in progress. Say it is ready; let the reload happen on request.
@@ -50,6 +51,26 @@ export function App() {
   const selectedDecls = state.selection.elementId
     ? state.targets?.declsByElement.get(state.selection.elementId) ?? []
     : [];
+  const selectedHover = state.selection.elementId
+    ? state.targets?.hoverByElement.get(state.selection.elementId) ?? []
+    : [];
+
+  // Releasing on selection change stops a held hover following you to the next
+  // element, where it would be showing something that is not true of it.
+  useEffect(() => { setHoverHeld(false); }, [state.selection.elementId]);
+
+  const forceHover = useMemo(
+    () => (hoverHeld && state.selection.elementId
+      ? {
+          elementId: state.selection.elementId,
+          decls: selectedHover.map((d) => ({
+            prop: d.prop,
+            value: state.changes.get(d.id)?.nextValue ?? d.value,
+          })),
+        }
+      : null),
+    [hoverHeld, state.selection.elementId, selectedHover, state.changes],
+  );
 
   /** A click in the page maps to the first indexed string of that element. */
   const onSelectElement = useCallback((elementId: string, runOrdinal: number) => {
@@ -85,6 +106,18 @@ export function App() {
     }),
     [ed.changeList, state.targets],
   );
+
+  /**
+   * Editing a hover value holds the element in its hover state.
+   *
+   * Without this you would be typing a colour with no way to see it: the
+   * pointer is over the panel, and the page's own hover still shows the value
+   * the runtime captured when it rendered.
+   */
+  const editWithHover = useCallback((id: string, v: string) => {
+    if (state.targets?.byId.get(id)?.kind === 'css-hover') setHoverHeld(true);
+    ed.edit(id, v);
+  }, [ed, state.targets]);
 
   const doPublish = async () => {
     if (!state.source || !state.targets || !fileText) return;
@@ -259,6 +292,7 @@ export function App() {
                 onSelectElement={onSelectElement}
                 selectedElementId={state.selection.elementId}
                 liveEdits={liveEdits}
+                forceHover={forceHover}
               />
             )}
             {mode !== 'page' && state.bundle && (
@@ -296,8 +330,11 @@ export function App() {
             <StylePanel
               element={selectedElement}
               decls={selectedDecls}
+              hoverDecls={selectedHover}
+              hoverHeld={hoverHeld}
+              onHoldHover={setHoverHeld}
               valueOf={ed.valueOf}
-              onEdit={ed.edit}
+              onEdit={editWithHover}
               changes={state.changes}
               targetsById={state.targets.byId}
               tokens={state.targets.tokens}

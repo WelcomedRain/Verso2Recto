@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
-import { parseDeclarations, findThemeTokens, elementStyle, resolveVar } from './css';
+import { parseDeclarations, findThemeTokens, elementStyle, elementHoverStyle, hasHoverStyle, resolveVar } from './css';
 import { parseBundle } from './bundle';
 import { indexTemplate, applyEdits } from './htmlIndex';
 
@@ -135,6 +135,53 @@ describe.skipIf(!hasReal)('against the real site', () => {
     expect(after.find((d) => d.prop === 'font-size')!.value).toBe('40px');
     expect(after.find((d) => d.prop === 'line-height')!.value).toBe('1.03');
     expect(after).toHaveLength(elementStyle(h1El).length);
+  });
+
+  it('finds the hover styles the editor could not previously see', () => {
+    const b = parseBundle(source);
+    const idx = indexTemplate(b.template);
+    const hovering = idx.elements.filter(hasHoverStyle);
+    expect(hovering.length).toBeGreaterThanOrEqual(10);
+
+    // Every hover range must slice back to its own value, exactly as the base
+    // styles do — same machinery, so the same guarantee.
+    for (const el of hovering) {
+      for (const d of elementHoverStyle(el)) {
+        expect(b.template.slice(d.valueStart, d.valueEnd)).toBe(d.value);
+        expect(d.state).toBe('hover');
+      }
+    }
+  });
+
+  it('keeps base and hover declarations apart', () => {
+    const b = parseBundle(source);
+    const idx = indexTemplate(b.template);
+    const el = idx.elements.find(hasHoverStyle)!;
+    const base = elementStyle(el);
+    const hover = elementHoverStyle(el);
+    expect(base.every((d) => d.state === 'base')).toBe(true);
+    // Ids must not collide, or one would overwrite the other in the target map.
+    const ids = new Set([...base, ...hover].map((d) => d.id));
+    expect(ids.size).toBe(base.length + hover.length);
+    // And their ranges must not overlap.
+    for (const bd of base) for (const hd of hover) {
+      expect(bd.valueEnd <= hd.valueStart || hd.valueEnd <= bd.valueStart).toBe(true);
+    }
+  });
+
+  it('editing a hover value leaves the base style untouched', () => {
+    const b = parseBundle(source);
+    const idx = indexTemplate(b.template);
+    const el = idx.elements.find((e) => hasHoverStyle(e) && elementStyle(e).length > 0)!;
+    const hv = elementHoverStyle(el)[0];
+    const baseBefore = elementStyle(el).map((d) => `${d.prop}:${d.value}`);
+    const next = applyEdits(b.template, [
+      { start: hv.valueStart, end: hv.valueEnd, replacement: '#00ff00' },
+    ]);
+    const nextIdx = indexTemplate(next);
+    const nextEl = nextIdx.elements.find((e) => e.path === el.path)!;
+    expect(elementHoverStyle(nextEl)[0].value).toBe('#00ff00');
+    expect(elementStyle(nextEl).map((d) => `${d.prop}:${d.value}`)).toEqual(baseBefore);
   });
 
   it('finds inline styles on a large share of elements', () => {

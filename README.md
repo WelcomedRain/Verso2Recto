@@ -119,6 +119,22 @@ override":
 - **Style** — declarations from the selected element's `style` attribute. The
   dozen properties people actually reach for are surfaced first, the rest behind
   "show more". Nothing is hidden, just ordered.
+- **On hover** — `style-hover` is the Claude Design runtime's own attribute, not
+  a web standard. It parses and patches like any other declaration list, and
+  until now the editor could not see it at all: you could change a button's
+  colour but not what it does on hover, and nothing said why.
+
+A hover style is invisible while you edit it — your pointer is over the panel,
+not the page — so the panel can hold an element in its hover appearance. Editing
+a hover value engages that hold automatically.
+
+Worth knowing: the runtime **consumes** `style-hover` while rendering and wires
+its own handlers, so no element carries it in the live DOM (293 carry
+`data-recto-id`, which it passes straight through). The page cannot be told
+about a hover change, which is why the hold applies the declarations inline
+rather than writing the attribute back. Actually hovering the element in the
+preview still shows the value captured at render; the hold is the accurate
+preview until you publish.
 
 Live preview works by setting the property on the element, or the custom
 property on `<html>` — an inline custom property outranks the `:root` rule, so

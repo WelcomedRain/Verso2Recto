@@ -119,6 +119,40 @@ const BRIDGE = String.raw`
       document.documentElement.style.setProperty(m.prop, m.value);
     }
 
+    // There is deliberately no handler for writing style-hover back. Measured
+    // against the live bundle: the Claude Design runtime consumes that
+    // attribute while rendering and wires its own handlers, so zero elements
+    // carry it in the DOM (293 carry data-recto-id, which it passes through).
+    // Setting it would write to nothing. recto:force-hover is the honest
+    // preview: it applies the declarations inline and remembers what to
+    // restore.
+
+    if (m.type === 'recto:force-hover') {
+      // Release whatever was held before, restoring the exact inline values.
+      if (window.__rectoHeld) {
+        var prev = document.querySelector('[data-recto-id="' + window.__rectoHeld.id + '"]');
+        if (prev) {
+          for (var k in window.__rectoHeld.before) {
+            if (window.__rectoHeld.before[k] === null) prev.style.removeProperty(k);
+            else prev.style.setProperty(k, window.__rectoHeld.before[k]);
+          }
+        }
+        window.__rectoHeld = null;
+      }
+      if (m.elementId && m.decls && m.decls.length) {
+        var el2 = document.querySelector('[data-recto-id="' + m.elementId + '"]');
+        if (el2) {
+          var before = {};
+          for (var di = 0; di < m.decls.length; di++) {
+            var pr = m.decls[di].prop;
+            before[pr] = el2.style.getPropertyValue(pr) || null;
+            el2.style.setProperty(pr, m.decls[di].value, 'important');
+          }
+          window.__rectoHeld = { id: m.elementId, before: before };
+        }
+      }
+    }
+
     if (m.type === 'recto:select-id') {
       var s = document.querySelector('[data-recto-id="' + m.elementId + '"]');
       if (selected) selected.removeAttribute('data-recto-selected');

@@ -8,9 +8,9 @@
  */
 
 import { encodeAttr, encodeText, type TemplateIndex } from './htmlIndex';
-import { elementStyle, findThemeTokens, type StyleDecl, type ThemeToken } from './css';
+import { elementHoverStyle, elementStyle, findThemeTokens, type StyleDecl, type ThemeToken } from './css';
 
-export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-theme';
+export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme';
 
 export interface EditTarget {
   id: string;
@@ -36,6 +36,8 @@ export interface TargetSet {
   byId: Map<string, EditTarget>;
   tokens: ThemeToken[];
   declsByElement: Map<string, StyleDecl[]>;
+  /** Declarations the runtime applies on pointer enter. */
+  hoverByElement: Map<string, StyleDecl[]>;
 }
 
 /**
@@ -51,8 +53,9 @@ export function encodeFor(kind: TargetKind, value: string): string {
     case 'attr':
       return encodeAttr(value);
     case 'css-inline':
-      // Sits inside style="…", so it is an attribute value first and CSS
-      // second. A stray quote would end the attribute.
+    case 'css-hover':
+      // Sits inside style="…" or style-hover="…", so it is an attribute value
+      // first and CSS second. A stray quote would end the attribute.
       return encodeAttr(value);
     case 'css-theme':
       // Sits in <style> raw text, where entities are NOT decoded — writing
@@ -64,8 +67,8 @@ export function encodeFor(kind: TargetKind, value: string): string {
 
 /** Reject values that cannot be written safely, before anything is patched. */
 export function validate(kind: TargetKind, value: string): string | null {
-  if (kind === 'css-theme' || kind === 'css-inline') {
-    if (value.includes(';') && kind === 'css-inline') {
+  if (kind === 'css-theme' || kind === 'css-inline' || kind === 'css-hover') {
+    if (value.includes(';') && kind !== 'css-theme') {
       return 'A single value cannot contain a semicolon — that would add another property.';
     }
     if (value.includes('}') || value.includes('{')) {
@@ -95,22 +98,27 @@ export function buildTargets(template: string, index: TemplateIndex): TargetSet 
   }
 
   const declsByElement = new Map<string, StyleDecl[]>();
+  const hoverByElement = new Map<string, StyleDecl[]>();
   for (const el of index.elements) {
-    const decls = elementStyle(el);
-    if (!decls.length) continue;
-    declsByElement.set(el.id, decls);
-    for (const d of decls) {
-      byId.set(d.id, {
-        id: d.id,
-        kind: 'css-inline',
-        start: d.valueStart,
-        end: d.valueEnd,
-        label: `${el.tag} · ${d.prop}`,
-        tag: d.prop,
-        current: d.value,
-        elementId: el.id,
-        prop: d.prop,
-      });
+    for (const [decls, kind, store] of [
+      [elementStyle(el), 'css-inline' as const, declsByElement],
+      [elementHoverStyle(el), 'css-hover' as const, hoverByElement],
+    ] as const) {
+      if (!decls.length) continue;
+      store.set(el.id, decls);
+      for (const d of decls) {
+        byId.set(d.id, {
+          id: d.id,
+          kind,
+          start: d.valueStart,
+          end: d.valueEnd,
+          label: kind === 'css-hover' ? `${el.tag} · ${d.prop} on hover` : `${el.tag} · ${d.prop}`,
+          tag: d.prop,
+          current: d.value,
+          elementId: el.id,
+          prop: d.prop,
+        });
+      }
     }
   }
 
@@ -128,5 +136,5 @@ export function buildTargets(template: string, index: TemplateIndex): TargetSet 
     });
   }
 
-  return { byId, tokens, declsByElement };
+  return { byId, tokens, declsByElement, hoverByElement };
 }

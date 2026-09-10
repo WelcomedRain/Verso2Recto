@@ -14,9 +14,17 @@ interface Props {
   onSelectElement: (elementId: string, runOrdinal: number) => void;
   /** Element to highlight when selection comes from the panel, not a click. */
   selectedElementId: string | null;
+  /**
+   * Hold an element in its hover appearance.
+   *
+   * A hover style is invisible while you are editing it — the pointer is over
+   * the panel, not the page — so without this the one thing you are changing is
+   * the one thing you cannot see.
+   */
+  forceHover: { elementId: string; decls: { prop: string; value: string }[] } | null;
   /** Edits pushed into the rendered page as the user types. */
   liveEdits: {
-    kind: 'text' | 'attr' | 'css-inline' | 'css-theme';
+    kind: 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme';
     elementId: string;
     runOrdinal: number;
     attrName?: string;
@@ -25,7 +33,7 @@ interface Props {
   }[];
 }
 
-export function PageView({ fileText, index, onSelectElement, selectedElementId, liveEdits }: Props) {
+export function PageView({ fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover }: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
   const [pane, setPane] = useState({ w: 0, h: 0 });
@@ -110,6 +118,11 @@ export function PageView({ fileText, index, onSelectElement, selectedElementId, 
         case 'css-inline':
           w.postMessage({ type: 'recto:set-style', elementId: e.elementId, prop: e.prop, value: e.value }, '*');
           break;
+        case 'css-hover':
+          // Nothing to push: the runtime already consumed style-hover, so the
+          // page cannot be told about a change to it. The forceHover hold
+          // renders the edited value instead.
+          break;
         case 'css-theme':
           w.postMessage({ type: 'recto:set-theme', prop: e.prop, value: e.value }, '*');
           break;
@@ -118,6 +131,13 @@ export function PageView({ fileText, index, onSelectElement, selectedElementId, 
       }
     }
   }, [liveEdits, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    frameRef.current?.contentWindow?.postMessage(
+      { type: 'recto:force-hover', ...(forceHover ?? { elementId: null, decls: [] }) }, '*',
+    );
+  }, [forceHover, ready]);
 
   useEffect(() => {
     if (!ready || !selectedElementId) return;

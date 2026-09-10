@@ -127,6 +127,21 @@ const BRIDGE = String.raw`
     // preview: it applies the declarations inline and remembers what to
     // restore.
 
+    if (m.type === 'recto:set-html') {
+      var ht = document.querySelector('[data-recto-id="' + m.elementId + '"]');
+      if (!ht) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = m.html;
+      var repl = tmp.firstElementChild;
+      if (!repl) return;
+      // Re-stamp the id or the element becomes unselectable the moment it is
+      // replaced. Its children are new markup and get no ids until reload,
+      // which is honest: they are not the nodes the index knows about.
+      repl.setAttribute('data-recto-id', m.elementId);
+      ht.replaceWith(repl);
+      if (selected && !selected.isConnected) selected = repl;
+    }
+
     if (m.type === 'recto:force-hover') {
       // Release whatever was held before, restoring the exact inline values.
       if (window.__rectoHeld) {

@@ -37,6 +37,17 @@ export interface PendingChange {
   tag: string;
   /** What kind of thing was edited: words, an inline style, a theme value. */
   kind: EditTarget['kind'];
+  /**
+   * Explicit range, used only by whole-element code edits.
+   *
+   * Every other change addresses a value that the index already holds, so it
+   * resolves through the target map. An element's own markup is not a value in
+   * that map — and must not be added to it, since its range contains every
+   * target inside the element and would break the no-overlap guarantee the map
+   * relies on. So a code edit carries its own range.
+   */
+  start?: number;
+  end?: number;
   /** The value on the live site, captured before the first edit. */
   liveValue: string;
   nextValue: string;
@@ -45,6 +56,12 @@ export interface PendingChange {
 /** Turn pending changes into byte-range edits against the template. */
 export function editsFor(changes: PendingChange[], targets: Map<string, EditTarget>): Edit[] {
   return changes.map((c) => {
+    if (c.kind === 'html') {
+      if (c.start == null || c.end == null) {
+        throw new Error(`Cannot publish "${c.label}": its position in the page was lost.`);
+      }
+      return { start: c.start, end: c.end, replacement: encodeFor('html', c.nextValue) };
+    }
     const t = targets.get(c.targetId);
     if (!t) throw new Error(`Cannot publish "${c.label}": its position in the page was lost.`);
     return { start: t.start, end: t.end, replacement: encodeFor(t.kind, c.nextValue) };

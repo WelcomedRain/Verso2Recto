@@ -6,6 +6,7 @@ import type { PendingChange } from '../core/publish';
 import type { EditTarget } from '../core/targets';
 import type { StyleDecl, ThemeToken } from '../core/css';
 import { StyleSections } from './StylePanel';
+import { ElementCodeEditor } from './CodeEditor';
 
 const fmtBytes = (b: number) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
 
@@ -96,6 +97,7 @@ export function PicturesPanel({
 export function SelectionPanel({
   entry, index, change, valueOf, onEdit, onUndo, onShowCode,
   element, decls, hoverDecls, targetsById, tokens, changes, hoverHeld, onHoldHover,
+  elementSource, elementPending, onEditHtml, onRevertHtml,
 }: {
   entry: StringEntry | null;
   index: TemplateIndex;
@@ -112,7 +114,23 @@ export function SelectionPanel({
   changes: Map<string, PendingChange>;
   hoverHeld: boolean;
   onHoldHover: (hold: boolean) => void;
+  elementSource: string | null;
+  elementPending: string | null;
+  onEditHtml: (html: string) => void;
+  onRevertHtml: () => void;
 }) {
+  const codeEditor = element && elementSource != null ? (
+    <div style={{ borderTop: '2px solid var(--color-divider)', paddingTop: 12 }} className="stack">
+      <ElementCodeEditor
+        source={elementSource}
+        tag={element.tag}
+        pending={elementPending}
+        onApply={onEditHtml}
+        onRevert={onRevertHtml}
+      />
+    </div>
+  ) : null;
+
   const styling = (
     <StyleSections
       compact
@@ -141,6 +159,7 @@ export function SelectionPanel({
             <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={onShowCode}>
               Show me the code
             </button>
+            {codeEditor}
           </>
         ) : (
           <div className="empty">Click anything in the page on the left.</div>
@@ -187,6 +206,8 @@ export function SelectionPanel({
       <div style={{ borderTop: '2px solid var(--color-divider)', paddingTop: 12 }} className="stack">
         {styling}
       </div>
+
+      {codeEditor}
     </div>
   );
 }

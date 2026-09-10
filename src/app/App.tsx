@@ -10,7 +10,18 @@ import { publish, type Step, type PublishResult } from '../core/publish';
 import { verifyDeployment, deployLabel } from '../core/deploy';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import * as db from '../core/db';
-import type { StringEntry } from '../core/htmlIndex';
+import { outerRange, type StringEntry } from '../core/htmlIndex';
+import type { TargetKind } from '../core/targets';
+
+/** One change, in the shape the preview bridge wants. */
+interface LiveEdit {
+  kind: TargetKind;
+  elementId: string;
+  runOrdinal: number;
+  attrName?: string;
+  prop?: string;
+  value: string;
+}
 
 type Mode = 'page' | 'split' | 'code';
 type Tab = 'words' | 'style' | 'theme' | 'pictures' | 'selection';
@@ -59,6 +70,16 @@ export function App() {
   // element, where it would be showing something that is not true of it.
   useEffect(() => { setHoverHeld(false); }, [state.selection.elementId]);
 
+  const elementSource = useMemo(() => {
+    if (!selectedElement || !state.bundle) return null;
+    const { start, end } = outerRange(selectedElement);
+    return state.bundle.template.slice(start, end);
+  }, [selectedElement, state.bundle]);
+
+  const elementPending = selectedElement
+    ? state.changes.get(`html:${selectedElement.id}`)?.nextValue ?? null
+    : null;
+
   const forceHover = useMemo(
     () => (hoverHeld && state.selection.elementId
       ? {
@@ -92,7 +113,17 @@ export function App() {
   }, [ed]);
 
   const liveEdits = useMemo(
-    () => ed.changeList.flatMap((c) => {
+    () => ed.changeList.flatMap((c): LiveEdit[] => {
+      // A code edit has no entry in the target map by design; it carries its
+      // own identity in the change.
+      if (c.kind === 'html') {
+        return [{
+          kind: 'html',
+          elementId: c.targetId.slice('html:'.length),
+          runOrdinal: 0,
+          value: c.nextValue,
+        }];
+      }
       const t = state.targets?.byId.get(c.targetId);
       if (!t) return [];
       return [{
@@ -377,6 +408,10 @@ export function App() {
               changes={state.changes}
               hoverHeld={hoverHeld}
               onHoldHover={setHoverHeld}
+              elementSource={elementSource}
+              elementPending={elementPending}
+              onEditHtml={(html) => selectedElement && ed.editElementHtml(selectedElement.id, html)}
+              onRevertHtml={() => selectedElement && ed.undo(`html:${selectedElement.id}`)}
             />
           )}
         </aside>

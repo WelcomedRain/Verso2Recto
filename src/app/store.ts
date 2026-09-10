@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseBundle, listAssets, type Bundle, type AssetInfo } from '../core/bundle';
 import { indexTemplate, type TemplateIndex, type StringEntry } from '../core/htmlIndex';
 import { buildTargets, validate, type EditTarget, type TargetSet } from '../core/targets';
+import { outerRange } from '../core/htmlIndex';
 import { GitHub, parseRepoInput, type RepoRef } from '../core/github';
 import { verifyHeadTags, type PendingChange } from '../core/publish';
 import { liveUrlFor, type DeployObservation } from '../core/deploy';
@@ -387,6 +388,79 @@ export function useEditor() {
     [],
   );
 
+  /**
+   * Replace one element's entire markup.
+   *
+   * Not routed through `edit`, because this target does not exist until it is
+   * created: element ranges are not in the target map, which holds values
+   * rather than whole elements.
+   *
+   * The subtlety is overlap. Any queued edit inside this element addresses
+   * bytes that the new markup replaces, so publishing both would either throw
+   * on overlapping patches or apply them in a nonsensical order. Those edits
+   * are therefore dropped — the markup the user just wrote is the more recent
+   * and more specific statement of intent.
+   */
+  const editElementHtml = useCallback((elementId: string, nextHtml: string) => {
+    setState((s) => {
+      const el = s.index?.byId.get(elementId);
+      if (!el || !s.source || !s.bundle) return s;
+
+      const problem = validate('html', nextHtml);
+      if (problem) return { ...s, error: problem };
+
+      const { start, end } = outerRange(el);
+      const original = s.bundle.template.slice(start, end);
+      const id = `html:${elementId}`;
+      const changes = new Map(s.changes);
+
+      // Supersede anything queued inside the range being replaced.
+      let superseded = 0;
+      for (const [cid, c] of changes) {
+        if (cid === id) continue;
+        const t = s.targets?.byId.get(c.targetId);
+        if (t && t.start >= start && t.end <= end) {
+          changes.delete(cid);
+          void db.delPatch(cid);
+          superseded++;
+        }
+      }
+
+      if (nextHtml === original) {
+        changes.delete(id);
+        void db.delPatch(id);
+      } else {
+        const change: PendingChange = {
+          targetId: id,
+          file: s.source.path,
+          label: `${el.tag} · code`,
+          tag: 'code',
+          kind: 'html',
+          liveValue: original,
+          nextValue: nextHtml,
+          start,
+          end,
+        };
+        changes.set(id, change);
+        void db.putPatch({
+          ...change,
+          id,
+          createdAt: Date.now(),
+          baseFingerprint: db.fingerprint(s.bundle.template),
+        });
+      }
+
+      return {
+        ...s,
+        error: superseded
+          ? `${superseded} earlier change${superseded === 1 ? '' : 's'} inside this element ` +
+            'were replaced by the code you wrote.'
+          : null,
+        changes,
+      };
+    });
+  }, []);
+
   const undo = useCallback((targetId: string) => {
     setState((s) => {
       const changes = new Map(s.changes);
@@ -453,7 +527,7 @@ export function useEditor() {
 
   return {
     state, online, manualOffline, setManualOffline,
-    connect, checkRemote, applyRemote, keepLocal, dismissSync,
+    connect, checkRemote, applyRemote, keepLocal, dismissSync, editElementHtml,
     edit, undo, select, commitPublished, disconnect, dropOrphans, setDeploy,
     valueOf, changeList, patch,
   };
@@ -475,7 +549,9 @@ function reconcile(
   let orphaned = 0;
   let stale = false;
   for (const c of changes.values()) {
-    if (!targets.byId.has(c.targetId)) orphaned++;
+    // A code edit carries its own range and is deliberately absent from the
+    // target map, so its absence is not evidence of anything.
+    if (c.kind !== 'html' && !targets.byId.has(c.targetId)) orphaned++;
     const patch = c as Partial<db.StoredPatch>;
     if (patch.baseFingerprint && patch.baseFingerprint !== fp) stale = true;
   }

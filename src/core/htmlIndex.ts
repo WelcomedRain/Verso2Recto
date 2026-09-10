@@ -55,6 +55,12 @@ export interface ElementNode {
    */
   rawTextStart?: number;
   rawTextEnd?: number;
+  /**
+   * End of the element's closing tag, so `[openStart, closeEnd)` is its whole
+   * source. Absent when the element never closes — a void element, or markup
+   * that simply does not close it — in which case the open tag is the extent.
+   */
+  closeEnd?: number;
 }
 
 export type StringKind = 'text' | 'attr';
@@ -180,6 +186,9 @@ export function tokenize(src: string): TokenizeResult {
       const name = src.slice(lt + 2, end).trim().toLowerCase();
       for (let s = stack.length - 1; s >= 0; s--) {
         if (stack[s].tag === name) {
+          // Everything above it on the stack was left unclosed; give each the
+          // same end so no element claims source beyond its parent.
+          for (let k = stack.length - 1; k >= s; k--) stack[k].closeEnd = end + 1;
           stack.length = s;
           break;
         }
@@ -395,6 +404,16 @@ export function indexTemplate(src: string): TemplateIndex {
 
   strings.sort((a, b) => a.start - b.start);
   return { elements, byId, strings, stringsById: new Map(strings.map((s) => [s.id, s])) };
+}
+
+/**
+ * The element's entire source, open tag through closing tag.
+ *
+ * This is the range the code editor replaces, so it must never extend past the
+ * element — a wrong end here would silently eat a sibling.
+ */
+export function outerRange(el: ElementNode): { start: number; end: number } {
+  return { start: el.openStart, end: el.closeEnd ?? el.openEnd };
 }
 
 export interface Edit {

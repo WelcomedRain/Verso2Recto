@@ -5,6 +5,7 @@ import {
   type Device, type PreviewMessage,
 } from './preview';
 import type { TemplateIndex } from '../core/htmlIndex';
+import type { TargetKind } from '../core/targets';
 
 interface Props {
   file: string;
@@ -24,7 +25,7 @@ interface Props {
   forceHover: { elementId: string; decls: { prop: string; value: string }[] } | null;
   /** Edits pushed into the rendered page as the user types. */
   liveEdits: {
-    kind: 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme';
+    kind: TargetKind;
     elementId: string;
     runOrdinal: number;
     attrName?: string;
@@ -111,6 +112,9 @@ export function PageView({ fileText, index, onSelectElement, selectedElementId, 
           break;
         case 'css-inline':
           w.postMessage({ type: 'recto:set-style', elementId: e.elementId, prop: e.prop, value: e.value }, '*');
+          break;
+        case 'html':
+          w.postMessage({ type: 'recto:set-html', elementId: e.elementId, html: e.value }, '*');
           break;
         case 'css-hover':
           // Nothing to push: the runtime already consumed style-hover, so the

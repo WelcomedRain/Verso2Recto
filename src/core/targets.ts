@@ -7,10 +7,10 @@
  * each handle one kind of thing rather than three.
  */
 
-import { encodeAttr, encodeText, type TemplateIndex } from './htmlIndex';
+import { encodeAttr, encodeText, tokenize, type TemplateIndex } from './htmlIndex';
 import { elementHoverStyle, elementStyle, findThemeTokens, type StyleDecl, type ThemeToken } from './css';
 
-export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme';
+export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme' | 'html';
 
 export interface EditTarget {
   id: string;
@@ -62,11 +62,69 @@ export function encodeFor(kind: TargetKind, value: string): string {
       // &amp; here would put a literal ampersand-a-m-p in the stylesheet. The
       // only sequence that matters is one that could close the element.
       return value.replace(/<\//g, '<\\/');
+    case 'html':
+      // Already markup. Entity-encoding it would turn the user's tags into
+      // visible text. The bundle codec escapes it for the script block;
+      // structural safety is validateFragment's job, not this function's.
+      return value;
   }
+}
+
+const VOID = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+/**
+ * Check that a hand-edited fragment closes everything it opens.
+ *
+ * This is the guard that makes offering code editing defensible at all. An
+ * unclosed tag does not fail loudly — it silently swallows the rest of the
+ * page, because every following sibling becomes its child. Refusing costs a
+ * sentence; not refusing costs the layout of the whole site.
+ */
+export function validateFragment(fragment: string): string | null {
+  if (!fragment.trim()) {
+    return 'The code cannot be empty. Undo the change rather than clearing it.';
+  }
+
+  const opens: string[] = [];
+  const re = /<(\/?)([a-zA-Z][\w:-]*)([^>]*)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(fragment))) {
+    const name = m[2].toLowerCase();
+    if (VOID.has(name) || m[3].trimEnd().endsWith('/')) continue;
+    if (m[1]) {
+      const at = opens.lastIndexOf(name);
+      if (at === -1) return `There is a closing </${name}> with nothing to close.`;
+      if (at !== opens.length - 1) {
+        // `<div><p>text</div>` — closing an ancestor while a child is still
+        // open. A browser silently recovers from this, which is exactly why it
+        // has to be reported: the page looks fine and the structure is wrong.
+        const unclosed = opens[opens.length - 1];
+        return `<${unclosed}> is never closed, but </${name}> closes around it.`;
+      }
+      opens.length = at;
+    } else {
+      opens.push(name);
+    }
+  }
+  if (opens.length) {
+    const one = opens[opens.length - 1];
+    return `<${one}> is never closed. An unclosed tag swallows the rest of the page.`;
+  }
+
+  // It must still be markup, or we would be silently replacing an element with
+  // plain text.
+  if (!tokenize(fragment).elements.length) {
+    return 'That is not markup any more — there are no tags left in it.';
+  }
+  return null;
 }
 
 /** Reject values that cannot be written safely, before anything is patched. */
 export function validate(kind: TargetKind, value: string): string | null {
+  if (kind === 'html') return validateFragment(value);
   if (kind === 'css-theme' || kind === 'css-inline' || kind === 'css-hover') {
     if (value.includes(';') && kind !== 'css-theme') {
       return 'A single value cannot contain a semicolon — that would add another property.';

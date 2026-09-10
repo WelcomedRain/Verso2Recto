@@ -144,6 +144,28 @@ Values that are computed at runtime (`{{ availabilityText }}`) are shown
 read-only with an explanation, rather than offered as editable and then
 silently overwritten on render.
 
+## Editing the code
+
+Scoped to one element rather than the whole file. The page is a single 58 KB
+line of compiled output, so a free-roaming editor over it would invite exactly
+the accidental damage the rest of this app works to prevent — and the lines in
+Code view are derived for reading, not a real document to type into.
+
+An element is the right unit: it is what you selected, it has exact boundaries,
+its replacement can be checked before anything is written, and a mistake is
+confined to it. Select anything, open **Edit this code**, and you get that
+element's exact source.
+
+Every edit is validated before it can be applied. The failure worth refusing is
+an unclosed tag: it does not break the page visibly, it makes every following
+sibling a child of it. `<div><p>text</div>` is rejected too — a browser
+silently recovers from closing an ancestor around an open child, which is
+precisely why it has to be reported.
+
+A code edit supersedes anything queued inside the element it replaces, since
+the new markup is the more recent and more specific statement of intent. The
+app says so when it happens rather than dropping the work quietly.
+
 ## What's next
 
 - **Image replacement** — the 6 images are base64 in the manifest, keyed by UUID

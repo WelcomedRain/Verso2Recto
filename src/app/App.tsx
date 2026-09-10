@@ -8,6 +8,7 @@ import { SourceDialog, ConnectDialog, PublishDialog, SyncDialog } from './Dialog
 import { FileText, Image as ImageIcon } from './icons';
 import { publish, type Step, type PublishResult } from '../core/publish';
 import { verifyDeployment, deployLabel } from '../core/deploy';
+import { useRegisterSW } from 'virtual:pwa-register/react';
 import * as db from '../core/db';
 import type { StringEntry } from '../core/htmlIndex';
 
@@ -24,6 +25,10 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+
+  // A new build is fetched in the background but never applied underneath an
+  // edit in progress. Say it is ready; let the reload happen on request.
+  const { needRefresh: [updateReady], updateServiceWorker } = useRegisterSW();
 
   const [pub, setPub] = useState<{
     open: boolean; phase: 'review' | 'running' | 'done';
@@ -135,7 +140,7 @@ export function App() {
       <header className="header">
         <div className="brand">
           <span className="brand-mark" />
-          <span className="brand-name">RECTO</span>
+          <span className="brand-name">RECTOVERITAS</span>
         </div>
         <span className="rule-v" />
         <button className="source-btn" onClick={() => setShowSource(true)}>
@@ -348,7 +353,17 @@ export function App() {
             ? 'Editing a copy — the live site is untouched'
             : deployLabel(state.deploy, state.lastPush)}
         </span>
-        <span style={{ marginLeft: 'auto' }}>Installed as an app</span>
+        {updateReady && (
+          <button
+            className="chip dirty"
+            style={{ marginLeft: 'auto', cursor: 'pointer' }}
+            onClick={() => updateServiceWorker(true)}
+            title="A newer version of RectoVeritas has been downloaded"
+          >
+            Update ready · reload
+          </button>
+        )}
+        <span style={{ marginLeft: updateReady ? 12 : 'auto' }}>Installed as an app</span>
       </footer>
 
       {/* ---------------- dialogs ---------------- */}

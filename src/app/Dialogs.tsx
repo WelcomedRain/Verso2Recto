@@ -99,7 +99,7 @@ export function ConnectDialog({
           <div>
             <h2>Connect your site</h2>
             <p style={{ marginTop: 6 }}>
-              Recto keeps a complete copy on this device so you can work with no connection,
+              RectoVeritas keeps a complete copy on this device so you can work with no connection,
               and publishes when you ask it to.
             </p>
           </div>
@@ -267,7 +267,7 @@ export function PublishDialog({
 
           {!online && (
             <div className="banner-err">
-              You are offline. Recto will do everything it can now and send it to GitHub by
+              You are offline. RectoVeritas will do everything it can now and send it to GitHub by
               itself as soon as you are back online.
             </div>
           )}

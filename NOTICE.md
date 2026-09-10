@@ -2,7 +2,7 @@
 
 Copyright © 2026 Gene Bernardin — <https://antheasolve.com>
 
-Verso2Recto is released under the
+RectoVeritas is released under the
 [PolyForm Noncommercial License 1.0.0](LICENSE).
 
 ## In plain terms
@@ -22,7 +22,7 @@ charities, schools, public research bodies, and government.
   or service
 - remove or obscure this notice
 
-If you want to use Verso2Recto commercially, ask — the answer may well be yes.
+If you want to use RectoVeritas commercially, ask — the answer may well be yes.
 Contact: <hello@antheasolve.com>
 
 ## Why this license rather than "open source"

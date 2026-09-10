@@ -94,7 +94,7 @@ export function CodeView({ text, revealAt, compiled }: Props) {
     <div className="code-view" ref={boxRef}>
       {compiled && (
         <div className="warn">
-          This file is built by your design tool, not written by hand. Recto edits it precisely
+          This file is built by your design tool, not written by hand. RectoVeritas edits it precisely
           and puts everything back exactly as it found it — but do not retype it here.
         </div>
       )}

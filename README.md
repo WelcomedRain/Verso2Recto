@@ -1,4 +1,4 @@
-# Verso2Recto
+# RectoVeritas
 
 An offline-first PWA for editing a GitHub-hosted static site — click any words on
 the rendered page, change them, and publish with one button. Built for

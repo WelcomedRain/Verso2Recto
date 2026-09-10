@@ -60,10 +60,12 @@ export default defineConfig({
         name: 'RECTO • VERITAS',
         short_name: 'RECTO • VERITAS',
         description: 'Edit a GitHub-hosted site offline, then publish with one button.',
-        // Tints the installed app's title bar. The accent, not the icon
-        // ground — the window frame is the one place the brand colour gets
-        // to be the loudest thing on screen.
-        theme_color: '#ec3013',
+        // Tints the installed app's title bar, where the browser picks the
+        // title text colour by luminance. #ec3013 sits in the dead zone —
+        // white lands at 4.20:1 and black at 5.00:1, so neither is comfortable
+        // and different browsers choose differently. accent-700 is the same
+        // brand red a step deeper, and puts white text at a decisive 7.17:1.
+        theme_color: '#ae1800',
         background_color: '#f3f2f2',
         display: 'standalone',
         start_url: base,

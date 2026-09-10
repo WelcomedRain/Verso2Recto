@@ -237,6 +237,11 @@ export function App() {
     return bg ? state.targets.byId.get(bg.id) ?? null : null;
   }, [selectedImageElement, state.index, state.targets]);
 
+  const originalStyleFor = useCallback((elementId: string): string => {
+    const el = state.index?.byId.get(elementId);
+    return el?.attrs.find((a) => a.name === 'style')?.value ?? '';
+  }, [state.index]);
+
   const originalHtmlFor = useCallback((elementId: string): string | null => {
     const el = state.index?.byId.get(elementId);
     if (!el || !state.bundle) return null;
@@ -287,6 +292,14 @@ export function App() {
     () => ed.changeList.flatMap((c): LiveEdit[] => {
       // A code edit has no entry in the target map by design; it carries its
       // own identity in the change.
+      if (c.kind === 'style-attr') {
+        return [{
+          kind: 'style-attr',
+          elementId: c.targetId.slice('override:'.length),
+          runOrdinal: 0,
+          value: c.nextValue,
+        }];
+      }
       if (c.kind === 'html') {
         return [{
           kind: 'html',
@@ -513,6 +526,7 @@ export function App() {
                 sweepFor={sweepFor}
                 onSwept={onSwept}
                 originalHtmlFor={originalHtmlFor}
+                originalStyleFor={originalStyleFor}
               />
             )}
             {mode !== 'page' && state.bundle && (
@@ -556,6 +570,7 @@ export function App() {
               onHoldHover={setHoverHeld}
               valueOf={ed.valueOf}
               onEdit={editWithHover}
+              onScopeToElement={ed.applyOverride}
               changes={state.changes}
               targetsById={state.targets.byId}
               tokens={state.targets.tokens}
@@ -566,6 +581,8 @@ export function App() {
             <ThemePanel
               valueOf={ed.valueOf}
               onEdit={ed.edit}
+              onScopeToElement={ed.applyOverride}
+              selectedElementId={state.selection.elementId}
               changes={state.changes}
               targetsById={state.targets.byId}
               tokens={state.targets.tokens}
@@ -613,6 +630,7 @@ export function App() {
               change={selectedEntry ? state.changes.get(selectedEntry.id) : undefined}
               valueOf={ed.valueOf}
               onEdit={editWithHover}
+              onScopeToElement={ed.applyOverride}
               onUndo={ed.undo}
               onShowCode={() => setMode('split')}
               element={selectedElement}

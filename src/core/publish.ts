@@ -8,7 +8,7 @@
  */
 
 import { parseBundle, serializeBundle, verifyRoundTrip } from './bundle';
-import { applyEdits, type Edit } from './htmlIndex';
+import { applyEdits, encodeAttr, type Edit } from './htmlIndex';
 import { encodeFor, type EditTarget } from './targets';
 import { GitHub, type RepoRef } from './github';
 
@@ -56,11 +56,21 @@ export interface PendingChange {
 /** Turn pending changes into byte-range edits against the template. */
 export function editsFor(changes: PendingChange[], targets: Map<string, EditTarget>): Edit[] {
   return changes.map((c) => {
-    if (c.kind === 'html') {
+    if (c.kind === 'html' || c.kind === 'style-attr') {
       if (c.start == null || c.end == null) {
         throw new Error(`Cannot publish "${c.label}": its position in the page was lost.`);
       }
-      return { start: c.start, end: c.end, replacement: encodeFor('html', c.nextValue) };
+      if (c.kind === 'html') {
+        return { start: c.start, end: c.end, replacement: encodeFor('html', c.nextValue) };
+      }
+      // An element with no style attribute needs one written, not a value
+      // swapped — an empty range means insert.
+      const inner = encodeAttr(c.nextValue);
+      return {
+        start: c.start,
+        end: c.end,
+        replacement: c.start === c.end ? ` style="${inner}"` : inner,
+      };
     }
     const t = targets.get(c.targetId);
     if (!t) throw new Error(`Cannot publish "${c.label}": its position in the page was lost.`);

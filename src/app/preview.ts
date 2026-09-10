@@ -127,6 +127,11 @@ const BRIDGE = String.raw`
     // preview: it applies the declarations inline and remembers what to
     // restore.
 
+    if (m.type === 'recto:set-style-attr') {
+      var sa = document.querySelector('[data-recto-id="' + m.elementId + '"]');
+      if (sa) sa.setAttribute('style', m.value || '');
+    }
+
     if (m.type === 'recto:measure-fit') {
       // How an image actually sits in its frame can only be measured, not
       // inferred: the frame is laid out by the cascade, and its width here is

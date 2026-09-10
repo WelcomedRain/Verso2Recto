@@ -36,6 +36,8 @@ interface Props {
   assetRefs: Record<string, string>;
   /** The unedited markup for an element, to put back when an edit is undone. */
   originalHtmlFor: (elementId: string) => string | null;
+  /** The unedited style attribute, for the same reason. */
+  originalStyleFor: (elementId: string) => string;
   onFitMeasured: (m: FitMeasurement) => void;
   /** Edits pushed into the rendered page as the user types. */
   liveEdits: {
@@ -51,7 +53,7 @@ interface Props {
 export function PageView({
   fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover,
   matchSelectors, onRulesMatched, measureFitFor, onFitMeasured, assetRefs,
-  sweepFor, onSwept, originalHtmlFor,
+  sweepFor, onSwept, originalHtmlFor, originalStyleFor,
 }: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
@@ -155,6 +157,7 @@ export function PageView({
    * the working copy no longer contains.
    */
   const replaced = useRef<Set<string>>(new Set());
+  const restyled = useRef<Set<string>>(new Set());
 
   // Push edits into the rendered page as they are typed.
   useEffect(() => {
@@ -168,6 +171,10 @@ export function PageView({
           break;
         case 'css-inline':
           w.postMessage({ type: 'recto:set-style', elementId: e.elementId, prop: e.prop, value: e.value }, '*');
+          break;
+        case 'style-attr':
+          restyled.current.add(e.elementId);
+          w.postMessage({ type: 'recto:set-style-attr', elementId: e.elementId, value: e.value }, '*');
           break;
         case 'html':
           replaced.current.add(e.elementId);
@@ -185,6 +192,16 @@ export function PageView({
           w.postMessage({ type: 'recto:set-text', elementId: e.elementId, runOrdinal: e.runOrdinal, value: e.value }, '*');
       }
     }
+    // Same for a scoped override: removing one sends nothing on its own.
+    const styled = new Set(
+      liveEdits.filter((e) => e.kind === 'style-attr').map((e) => e.elementId),
+    );
+    for (const id of [...restyled.current]) {
+      if (styled.has(id)) continue;
+      restyled.current.delete(id);
+      w.postMessage({ type: 'recto:set-style-attr', elementId: id, value: originalStyleFor(id) }, '*');
+    }
+
     // Anything we replaced that is no longer edited goes back to its source.
     const live = new Set(liveEdits.filter((e) => e.kind === 'html').map((e) => e.elementId));
     for (const id of [...replaced.current]) {
@@ -195,7 +212,7 @@ export function PageView({
         w.postMessage({ type: 'recto:set-html', elementId: id, html: original, assetRefs }, '*');
       }
     }
-  }, [liveEdits, ready, assetRefs, originalHtmlFor]);
+  }, [liveEdits, ready, assetRefs, originalHtmlFor, originalStyleFor]);
 
   useEffect(() => {
     if (!ready) return;

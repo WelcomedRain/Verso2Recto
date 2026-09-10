@@ -22,6 +22,8 @@ export interface MatchedRule { rule: CssRule; count: number }
 interface Common {
   valueOf: (t: EditTarget) => string;
   onEdit: (id: string, v: string) => void;
+  /** Set a property on one element only, leaving the shared value alone. */
+  onScopeToElement: (elementId: string, prop: string, value: string) => void;
   changes: Map<string, PendingChange>;
   targetsById: Map<string, EditTarget>;
   tokens: ThemeToken[];
@@ -69,6 +71,80 @@ export function ValueField({
   );
 }
 
+/**
+ * A value that more than one element depends on.
+ *
+ * Typing is a draft here rather than an edit. A shared value cannot be changed
+ * on the way past — the count is the whole point, and asking once the intent is
+ * formed is better than asking on every keystroke. Nothing is queued until one
+ * of the two answers is chosen, so neither outcome can happen by accident:
+ * moving something shared without meaning to, or scattering one-off overrides
+ * that make the page inconsistent.
+ */
+export function SharedValueField({
+  target, value, edited, tokens, count, canScope, onChangeAll, onScope,
+}: {
+  target: EditTarget;
+  value: string;
+  edited: boolean;
+  tokens: ThemeToken[];
+  count: number;
+  /** False when nothing is selected to attach an override to. */
+  canScope: boolean;
+  onChangeAll: (v: string) => void;
+  onScope: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const pending = draft !== null && draft !== value;
+
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <ValueField
+        target={target}
+        value={draft ?? value}
+        edited={edited}
+        tokens={tokens}
+        onEdit={setDraft}
+      />
+      {pending && (
+        <div className="card">
+          <div className="card-body">
+            <b>{count} places use this.</b>{' '}
+            {canScope
+              ? 'Change it everywhere, or set it on this element only?'
+              : 'Nothing is selected to set it on, so this changes everywhere it is used.'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: 11, padding: '5px 9px' }}
+              onClick={() => { onChangeAll(draft!); setDraft(null); }}
+            >
+              Change all {count}
+            </button>
+            {canScope && (
+              <button
+                className="btn"
+                style={{ fontSize: 11, padding: '5px 9px' }}
+                onClick={() => { onScope(draft!); setDraft(null); }}
+              >
+                Just this one
+              </button>
+            )}
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: 11, padding: '5px 9px' }}
+              onClick={() => setDraft(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------------- Shared: the style sections --------------------- */
 
 /**
@@ -79,8 +155,8 @@ export function ValueField({
  * sending you to a different tab to find out is the tool declining to help.
  */
 export function StyleSections({
-  element, decls, hoverDecls, rules, valueOf, onEdit, changes, targetsById, tokens,
-  hoverHeld, onHoldHover, compact,
+  element, decls, hoverDecls, rules, valueOf, onEdit, onScopeToElement, changes,
+  targetsById, tokens, hoverHeld, onHoldHover, compact,
 }: Common & {
   element: ElementNode | null;
   decls: StyleDecl[];
@@ -154,13 +230,26 @@ export function StyleSections({
                   <span className="label">{d.prop}</span>
                   {changes.has(id) && <span className="tag" style={{ color: 'var(--color-accent-700)' }}>edited</span>}
                 </div>
-                <ValueField
-                  target={target}
-                  value={valueOf(target)}
-                  edited={changes.has(id)}
-                  tokens={tokens}
-                  onEdit={(v) => onEdit(id, v)}
-                />
+                {count > 1 ? (
+                  <SharedValueField
+                    target={target}
+                    value={valueOf(target)}
+                    edited={changes.has(id)}
+                    tokens={tokens}
+                    count={count}
+                    canScope={!!element}
+                    onChangeAll={(v) => onEdit(id, v)}
+                    onScope={(v) => element && onScopeToElement(element.id, d.prop, v)}
+                  />
+                ) : (
+                  <ValueField
+                    target={target}
+                    value={valueOf(target)}
+                    edited={changes.has(id)}
+                    tokens={tokens}
+                    onEdit={(v) => onEdit(id, v)}
+                  />
+                )}
               </div>
             );
           })}
@@ -257,11 +346,26 @@ export function StylePanel(props: Common & {
   );
 }
 
+/**
+ * Which CSS property a token most likely stands for.
+ *
+ * Only used for the "just this one" path, where a token has to become a real
+ * declaration on an element. A token name is a convention, not a contract, so
+ * this guesses and the user can correct it in the Style section afterwards.
+ */
+function guessProp(tokenName: string): string {
+  const n = tokenName.replace(/^--/, '').toLowerCase();
+  if (/(^|-)(bg|background|ground|surface)/.test(n)) return 'background';
+  if (/(^|-)(font|family|wordmark)/.test(n)) return 'font-family';
+  if (/(^|-)(size|space|radius|gap)/.test(n)) return 'padding';
+  return 'color';
+}
+
 /* -------------------------------- Theme ------------------------------- */
 
 export function ThemePanel({
-  valueOf, onEdit, changes, targetsById, tokens,
-}: Common) {
+  valueOf, onEdit, onScopeToElement, changes, targetsById, tokens, selectedElementId,
+}: Common & { selectedElementId: string | null }) {
   const [showSystem, setShowSystem] = useState(false);
 
   const primary = tokens.filter((t) => t.primary);
@@ -276,13 +380,26 @@ export function ThemePanel({
           <span className="label mono" style={{ textTransform: 'none', letterSpacing: 0 }}>{t.prop}</span>
           {changes.has(t.id) && <span className="tag" style={{ color: 'var(--color-accent-700)' }}>edited</span>}
         </div>
-        <ValueField
-          target={target}
-          value={valueOf(target)}
-          edited={changes.has(t.id)}
-          tokens={tokens}
-          onEdit={(v) => onEdit(t.id, v)}
-        />
+        {(target.usageCount ?? 0) > 1 ? (
+          <SharedValueField
+            target={target}
+            value={valueOf(target)}
+            edited={changes.has(t.id)}
+            tokens={tokens}
+            count={target.usageCount!}
+            canScope={!!selectedElementId}
+            onChangeAll={(v) => onEdit(t.id, v)}
+            onScope={(v) => selectedElementId && onScopeToElement(selectedElementId, guessProp(t.prop), v)}
+          />
+        ) : (
+          <ValueField
+            target={target}
+            value={valueOf(target)}
+            edited={changes.has(t.id)}
+            tokens={tokens}
+            onEdit={(v) => onEdit(t.id, v)}
+          />
+        )}
       </div>
     );
   };

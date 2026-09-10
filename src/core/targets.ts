@@ -10,7 +10,7 @@
 import { encodeAttr, encodeText, tokenize, type TemplateIndex } from './htmlIndex';
 import { elementHoverStyle, elementStyle, findRules, findThemeTokens, type CssRule, type StyleDecl, type ThemeToken } from './css';
 
-export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme' | 'css-rule' | 'html';
+export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme' | 'css-rule' | 'style-attr' | 'html';
 
 export interface EditTarget {
   id: string;
@@ -30,6 +30,14 @@ export interface EditTarget {
   attrName?: string;
   /** For css targets, the property being set. */
   prop?: string;
+  /**
+   * How many places in the page depend on this value.
+   *
+   * Only meaningful for shared things — a theme token or a stylesheet rule.
+   * Undefined means the value belongs to one element and changing it cannot
+   * surprise anyone.
+   */
+  usageCount?: number;
 }
 
 export interface TargetSet {
@@ -56,6 +64,7 @@ export function encodeFor(kind: TargetKind, value: string): string {
       return encodeAttr(value);
     case 'css-inline':
     case 'css-hover':
+    case 'style-attr':
       // Sits inside style="…" or style-hover="…", so it is an attribute value
       // first and CSS second. A stray quote would end the attribute.
       return encodeAttr(value);
@@ -202,6 +211,10 @@ export function buildTargets(template: string, index: TemplateIndex): TargetSet 
 
   const tokens = findThemeTokens(template, index);
   for (const t of tokens) {
+    // How many places read this token. Counted from the source rather than the
+    // DOM because a token can be referenced by a rule that matches nothing at
+    // the current width, and that still counts as somewhere it is used.
+    const uses = template.split(`var(${t.prop})`).length - 1;
     byId.set(t.id, {
       id: t.id,
       kind: 'css-theme',
@@ -211,6 +224,7 @@ export function buildTargets(template: string, index: TemplateIndex): TargetSet 
       tag: t.prop,
       current: t.value,
       prop: t.prop,
+      usageCount: uses,
     });
   }
 

@@ -253,6 +253,7 @@ export function PicturesPanel({
 export function SelectionPanel({
   entry, index, change, valueOf, onEdit, onUndo, onShowCode,
   element, decls, hoverDecls, rules, targetsById, tokens, changes, hoverHeld, onHoldHover,
+  onScopeToElement,
   elementSource, elementPending, onEditHtml, onRevertHtml,
 }: {
   entry: StringEntry | null;
@@ -260,6 +261,7 @@ export function SelectionPanel({
   change: PendingChange | undefined;
   valueOf: ((s: StringEntry) => string) & ((t: EditTarget) => string);
   onEdit: (id: string, v: string) => void;
+  onScopeToElement: (elementId: string, prop: string, value: string) => void;
   onUndo: (id: string) => void;
   onShowCode: () => void;
   element: ElementNode | null;
@@ -297,6 +299,7 @@ export function SelectionPanel({
       rules={rules}
       valueOf={valueOf}
       onEdit={onEdit}
+      onScopeToElement={onScopeToElement}
       changes={changes}
       targetsById={targetsById}
       tokens={tokens}

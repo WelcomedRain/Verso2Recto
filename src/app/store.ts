@@ -10,6 +10,7 @@ import { parseBundle, serializeBundle, listAssets, type Bundle, type AssetInfo }
 import { indexTemplate, type TemplateIndex, type StringEntry } from '../core/htmlIndex';
 import { buildTargets, validate, type EditTarget, type TargetSet } from '../core/targets';
 import { outerRange } from '../core/htmlIndex';
+import { parseDeclarations } from '../core/css';
 import { bytesToBase64, imageSizeFromBase64 } from '../core/imageMeta';
 import { GitHub, parseRepoInput, type RepoRef } from '../core/github';
 import { verifyHeadTags, type PendingChange } from '../core/publish';
@@ -512,6 +513,81 @@ export function useEditor() {
     };
   }, []);
 
+  /**
+   * Set a property on one element only, leaving the shared value alone.
+   *
+   * This is the "just this one" half of a shared edit. It writes into the
+   * element's own `style` attribute, which outranks both a stylesheet rule and
+   * a theme token without touching either.
+   *
+   * All of an element's overrides live in a single change keyed to its style
+   * attribute, because they all rewrite the same bytes — two changes over one
+   * range is a collision, not two edits. Pending edits to declarations already
+   * in that attribute are folded in and superseded for the same reason.
+   */
+  const applyOverride = useCallback((elementId: string, prop: string, value: string) => {
+    setState((s) => {
+      const el = s.index?.byId.get(elementId);
+      if (!el || !s.source || !s.bundle) return s;
+
+      const problem = validate('css-inline', value);
+      if (problem) return { ...s, error: problem };
+
+      const attr = el.attrs.find((a) => a.name === 'style');
+      const id = `override:${elementId}`;
+      const changes = new Map(s.changes);
+      const existingChange = changes.get(id);
+
+      // Start from what the attribute holds, with any queued per-declaration
+      // edits already applied — otherwise adding an override would quietly
+      // revert them.
+      const startingList = existingChange
+        ? parseDeclarations(existingChange.nextValue).map((d) => [d.prop, d.value] as const)
+        : parseDeclarations(attr?.value ?? '').map((d) => {
+            const declTarget = [...(s.targets?.byId.values() ?? [])].find(
+              (t) => t.kind === 'css-inline' && t.elementId === elementId && t.prop === d.prop,
+            );
+            const pending = declTarget && changes.get(declTarget.id)?.nextValue;
+            return [d.prop, pending ?? d.value] as const;
+          });
+
+      const merged = new Map(startingList);
+      merged.set(prop, value);
+      const nextStyle = [...merged].map(([k, v]) => `${k}:${v}`).join(';');
+
+      // Those per-declaration edits now live inside this one.
+      for (const [cid, c] of changes) {
+        const t = s.targets?.byId.get(c.targetId);
+        if (t?.kind === 'css-inline' && t.elementId === elementId) {
+          changes.delete(cid);
+          void db.delPatch(cid);
+        }
+      }
+
+      const change: PendingChange = {
+        targetId: id,
+        file: s.source.path,
+        label: `${el.tag} · ${prop} on this one only`,
+        tag: prop,
+        kind: 'style-attr',
+        liveValue: attr?.value ?? '',
+        nextValue: nextStyle,
+        // No style attribute yet, so one is inserted rather than replaced.
+        start: attr ? attr.valueStart : el.attrInsertAt,
+        end: attr ? attr.valueEnd : el.attrInsertAt,
+      };
+      changes.set(id, change);
+      void db.putPatch({
+        ...change,
+        id,
+        createdAt: Date.now(),
+        baseFingerprint: db.fingerprint(s.bundle.template),
+      });
+
+      return { ...s, error: null, changes };
+    });
+  }, []);
+
   const undo = useCallback((targetId: string) => {
     setState((s) => {
       const changes = new Map(s.changes);
@@ -578,7 +654,7 @@ export function useEditor() {
 
   return {
     state, online, manualOffline, setManualOffline,
-    connect, checkRemote, applyRemote, keepLocal, dismissSync, editElementHtml, replaceImage,
+    connect, checkRemote, applyRemote, keepLocal, dismissSync, editElementHtml, replaceImage, applyOverride,
     edit, undo, select, commitPublished, disconnect, dropOrphans, setDeploy,
     valueOf, changeList, patch,
   };
@@ -600,9 +676,12 @@ function reconcile(
   let orphaned = 0;
   let stale = false;
   for (const c of changes.values()) {
-    // A code edit carries its own range and is deliberately absent from the
-    // target map, so its absence is not evidence of anything.
-    if (c.kind !== 'html' && !targets.byId.has(c.targetId)) orphaned++;
+    // Some changes carry their own range and are deliberately absent from the
+    // target map — a code edit spans a whole element, a scoped override spans a
+    // whole style attribute, and both would overlap every target inside them.
+    // Their absence is not evidence of anything.
+    const selfDescribing = c.kind === 'html' || c.kind === 'style-attr';
+    if (!selfDescribing && !targets.byId.has(c.targetId)) orphaned++;
     const patch = c as Partial<db.StoredPatch>;
     if (patch.baseFingerprint && patch.baseFingerprint !== fp) stale = true;
   }

@@ -11,11 +11,13 @@
  */
 
 import { useMemo, useState } from 'react';
-import type { StyleDecl, ThemeToken } from '../core/css';
+import type { CssRule, StyleDecl, ThemeToken } from '../core/css';
 import { FEATURED_PROPS, isColorValue, resolveVar } from '../core/css';
 import type { EditTarget } from '../core/targets';
 import type { PendingChange } from '../core/publish';
 import type { ElementNode } from '../core/htmlIndex';
+
+export interface MatchedRule { rule: CssRule; count: number }
 
 interface Common {
   valueOf: (t: EditTarget) => string;
@@ -77,12 +79,13 @@ function ValueField({
  * sending you to a different tab to find out is the tool declining to help.
  */
 export function StyleSections({
-  element, decls, hoverDecls, valueOf, onEdit, changes, targetsById, tokens,
+  element, decls, hoverDecls, rules, valueOf, onEdit, changes, targetsById, tokens,
   hoverHeld, onHoldHover, compact,
 }: Common & {
   element: ElementNode | null;
   decls: StyleDecl[];
   hoverDecls: StyleDecl[];
+  rules: MatchedRule[];
   hoverHeld: boolean;
   onHoldHover: (hold: boolean) => void;
   compact?: boolean;
@@ -119,12 +122,64 @@ export function StyleSections({
 
   if (!element) return null;
 
+  const sheet = rules.length > 0 && (
+    <div className="stack" style={{ gap: 10, borderTop: '2px solid var(--color-divider)', paddingTop: 12 }}>
+      <div className="label">From the stylesheet</div>
+      <div className="empty" style={{ marginTop: -4 }}>
+        These rules style this element from the page's stylesheet rather than from the
+        element itself, so changing one moves everything it matches.
+      </div>
+      {rules.map(({ rule, count }) => (
+        <div className="stack" key={rule.id} style={{ gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--color-accent-700)', wordBreak: 'break-all' }}>
+              {rule.selector}
+            </span>
+            <span className="label" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+              {count === 1 ? 'this one only' : `${count} elements`}
+            </span>
+          </div>
+          {rule.conditions.length > 0 && (
+            <div className="label mono" style={{ textTransform: 'none', letterSpacing: 0 }}>
+              only {rule.conditions.join(' · ')}
+            </div>
+          )}
+          {rule.decls.map((d) => {
+            const id = `${rule.id}:${d.prop}`;
+            const target = targetsById.get(id);
+            if (!target) return null;
+            return (
+              <div className="field" key={id}>
+                <div className="field-head">
+                  <span className="label">{d.prop}</span>
+                  {changes.has(id) && <span className="tag" style={{ color: 'var(--color-accent-700)' }}>edited</span>}
+                </div>
+                <ValueField
+                  target={target}
+                  value={valueOf(target)}
+                  edited={changes.has(id)}
+                  tokens={tokens}
+                  onEdit={(v) => onEdit(id, v)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+
   if (!decls.length && !hoverDecls.length) {
     return (
-      <div className="empty">
-        This element has no styling of its own — it inherits from the page, or from the
-        theme. Change the matching value in the Theme tab to affect it.
-      </div>
+      <>
+        {rules.length === 0 && (
+          <div className="empty">
+            This element has no styling of its own and no stylesheet rule matches it — it
+            inherits from the page, or from the theme.
+          </div>
+        )}
+        {sheet}
+      </>
     );
   }
 
@@ -147,6 +202,8 @@ export function StyleSections({
           {showAll && rest.map(row)}
         </>
       )}
+
+      {sheet}
 
       {hoverDecls.length > 0 && (
         <div className="stack" style={{ gap: 8, borderTop: '2px solid var(--color-divider)', paddingTop: 12 }}>
@@ -178,6 +235,7 @@ export function StylePanel(props: Common & {
   element: ElementNode | null;
   decls: StyleDecl[];
   hoverDecls: StyleDecl[];
+  rules: MatchedRule[];
   hoverHeld: boolean;
   onHoldHover: (hold: boolean) => void;
 }) {

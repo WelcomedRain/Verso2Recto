@@ -264,3 +264,135 @@ export function resolveVar(value: string, tokens: ThemeToken[]): string | null {
   if (hit) return isColorValue(hit.value) ? hit.value.trim() : null;
   return m[2]?.trim() ?? null;
 }
+
+/* --------------------------- stylesheet rules -------------------------- */
+
+export interface CssRule {
+  id: string;
+  /** As written, e.g. `.btn-primary:hover` or `h1, h2, h3`. */
+  selector: string;
+  /**
+   * The selector with pseudo-classes and pseudo-elements removed.
+   *
+   * `element.matches()` on `.btn-primary:hover` is false unless the pointer is
+   * actually over it, so matching on the bare selector is the only way to find
+   * the rules that govern an element's other states — which are precisely the
+   * ones a person cannot reach by hovering while reaching for the panel.
+   */
+  matchSelector: string;
+  /** Pseudo state this rule describes, if any: `hover`, `focus-visible`. */
+  state: string | null;
+  decls: Declaration[];
+  /** Enclosing at-rule conditions, outermost first. */
+  conditions: string[];
+  blockIndex: number;
+}
+
+/** Blank out comments and string bodies so brace counting cannot be fooled. */
+function maskCss(css: string): string {
+  const out = css.split('');
+  let i = 0;
+  while (i < css.length) {
+    if (css[i] === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2);
+      const stop = end === -1 ? css.length : end + 2;
+      for (let k = i; k < stop; k++) out[k] = ' ';
+      i = stop;
+      continue;
+    }
+    if (css[i] === '"' || css[i] === "'") {
+      const q = css[i];
+      let k = i + 1;
+      while (k < css.length && !(css[k] === q && css[k - 1] !== '\\')) k++;
+      for (let j = i + 1; j < Math.min(k, css.length); j++) out[j] = ' ';
+      i = k + 1;
+      continue;
+    }
+    i++;
+  }
+  return out.join('');
+}
+
+const PSEUDO = /::?[a-zA-Z-]+(\([^)]*\))?/g;
+/** At-rules whose contents are not ordinary style rules. */
+const OPAQUE_AT = /^@(font-face|keyframes|-\w+-keyframes|import|charset|namespace|page|property)/i;
+const CONDITIONAL_AT = /^@(media|supports|container|layer)\b/i;
+
+/**
+ * Every style rule in the page's <style> blocks, with source ranges.
+ *
+ * `:root` rules are deliberately excluded: their declarations are already
+ * targets via `findThemeTokens`, and indexing the same bytes twice would give
+ * two targets over one range — which the patch engine treats as a collision,
+ * correctly.
+ */
+export function findRules(template: string, index: TemplateIndex): CssRule[] {
+  const blocks = index.elements.filter(
+    (e) => e.tag === 'style' && e.rawTextStart != null && e.rawTextEnd != null,
+  );
+  const out: CssRule[] = [];
+  let n = 0;
+
+  blocks.forEach((block, blockIndex) => {
+    const base = block.rawTextStart!;
+    const css = template.slice(base, block.rawTextEnd!);
+    const mask = maskCss(css);
+
+    const walk = (from: number, to: number, conditions: string[]) => {
+      let i = from;
+      while (i < to) {
+        const open = mask.indexOf('{', i);
+        if (open === -1 || open >= to) break;
+
+        // Find the matching close for this block.
+        let depth = 1;
+        let k = open + 1;
+        while (k < to && depth > 0) {
+          if (mask[k] === '{') depth++;
+          else if (mask[k] === '}') depth--;
+          k++;
+        }
+        const close = k - 1;
+        // Brace counting runs on the masked copy, but the selector text has to
+        // come from the real one — masking would blank strings inside
+        // attribute selectors. So strip comments from the prelude here, or a
+        // rule preceded by one ends up with the comment in its selector.
+        const prelude = css.slice(i, open).replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
+
+        if (OPAQUE_AT.test(prelude)) {
+          i = close + 1;
+          continue;
+        }
+        if (CONDITIONAL_AT.test(prelude)) {
+          walk(open + 1, close, [...conditions, prelude]);
+          i = close + 1;
+          continue;
+        }
+
+        const isRoot = /(^|,)\s*:root\b/.test(prelude);
+        if (prelude && !isRoot) {
+          const body = css.slice(open + 1, close);
+          const stripped = body.replace(/\/\*[\s\S]*?\*\//g, (c) => ' '.repeat(c.length));
+          const decls = parseDeclarations(stripped, base + open + 1);
+          if (decls.length) {
+            const pseudo = prelude.match(PSEUDO);
+            out.push({
+              id: `r${n++}`,
+              selector: prelude,
+              matchSelector: prelude.replace(PSEUDO, '').trim() || prelude,
+              state: pseudo ? pseudo[0].replace(/^::?/, '').replace(/\(.*\)$/, '') : null,
+              decls,
+              conditions,
+              blockIndex,
+            });
+          }
+        }
+        i = close + 1;
+      }
+    };
+
+    walk(0, css.length, []);
+  });
+
+  return out;
+}

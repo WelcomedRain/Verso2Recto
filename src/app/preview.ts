@@ -127,6 +127,23 @@ const BRIDGE = String.raw`
     // preview: it applies the declarations inline and remembers what to
     // restore.
 
+    if (m.type === 'recto:match-rules') {
+      // Selector matching has to happen against the real DOM: the editor knows
+      // the markup but not what the browser resolved it to.
+      var target = document.querySelector('[data-recto-id="' + m.elementId + '"]');
+      var res = [];
+      for (var mi = 0; mi < m.selectors.length; mi++) {
+        var sel = m.selectors[mi];
+        var applies = false, count = 0;
+        try {
+          applies = !!target && target.matches(sel);
+          count = document.querySelectorAll(sel).length;
+        } catch (err) { applies = false; count = 0; }
+        if (applies) res.push({ index: mi, count: count });
+      }
+      parent.postMessage({ type: 'recto:rules-matched', elementId: m.elementId, matches: res, token: m.token }, '*');
+    }
+
     if (m.type === 'recto:set-html') {
       var ht = document.querySelector('[data-recto-id="' + m.elementId + '"]');
       if (!ht) return;

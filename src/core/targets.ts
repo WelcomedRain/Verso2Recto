@@ -8,9 +8,9 @@
  */
 
 import { encodeAttr, encodeText, tokenize, type TemplateIndex } from './htmlIndex';
-import { elementHoverStyle, elementStyle, findThemeTokens, type StyleDecl, type ThemeToken } from './css';
+import { elementHoverStyle, elementStyle, findRules, findThemeTokens, type CssRule, type StyleDecl, type ThemeToken } from './css';
 
-export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme' | 'html';
+export type TargetKind = 'text' | 'attr' | 'css-inline' | 'css-hover' | 'css-theme' | 'css-rule' | 'html';
 
 export interface EditTarget {
   id: string;
@@ -35,6 +35,8 @@ export interface EditTarget {
 export interface TargetSet {
   byId: Map<string, EditTarget>;
   tokens: ThemeToken[];
+  /** Every style rule in the page's <style> blocks. */
+  rules: CssRule[];
   declsByElement: Map<string, StyleDecl[]>;
   /** Declarations the runtime applies on pointer enter. */
   hoverByElement: Map<string, StyleDecl[]>;
@@ -57,6 +59,7 @@ export function encodeFor(kind: TargetKind, value: string): string {
       // Sits inside style="…" or style-hover="…", so it is an attribute value
       // first and CSS second. A stray quote would end the attribute.
       return encodeAttr(value);
+    case 'css-rule':
     case 'css-theme':
       // Sits in <style> raw text, where entities are NOT decoded — writing
       // &amp; here would put a literal ampersand-a-m-p in the stylesheet. The
@@ -125,8 +128,8 @@ export function validateFragment(fragment: string): string | null {
 /** Reject values that cannot be written safely, before anything is patched. */
 export function validate(kind: TargetKind, value: string): string | null {
   if (kind === 'html') return validateFragment(value);
-  if (kind === 'css-theme' || kind === 'css-inline' || kind === 'css-hover') {
-    if (value.includes(';') && kind !== 'css-theme') {
+  if (kind === 'css-theme' || kind === 'css-rule' || kind === 'css-inline' || kind === 'css-hover') {
+    if (value.includes(';') && (kind === 'css-inline' || kind === 'css-hover')) {
       return 'A single value cannot contain a semicolon — that would add another property.';
     }
     if (value.includes('}') || value.includes('{')) {
@@ -180,6 +183,23 @@ export function buildTargets(template: string, index: TemplateIndex): TargetSet 
     }
   }
 
+  const rules = findRules(template, index);
+  for (const r of rules) {
+    for (const d of r.decls) {
+      const id = `${r.id}:${d.prop}`;
+      byId.set(id, {
+        id,
+        kind: 'css-rule',
+        start: d.valueStart,
+        end: d.valueEnd,
+        label: `${r.selector} · ${d.prop}`,
+        tag: d.prop,
+        current: d.value,
+        prop: d.prop,
+      });
+    }
+  }
+
   const tokens = findThemeTokens(template, index);
   for (const t of tokens) {
     byId.set(t.id, {
@@ -194,5 +214,5 @@ export function buildTargets(template: string, index: TemplateIndex): TargetSet 
     });
   }
 
-  return { byId, tokens, declsByElement, hoverByElement };
+  return { byId, tokens, rules, declsByElement, hoverByElement };
 }

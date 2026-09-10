@@ -136,6 +136,23 @@ rather than writing the attribute back. Actually hovering the element in the
 preview still shows the value captured at render; the hold is the accurate
 preview until you publish.
 
+- **From the stylesheet** — the rules in the page's `<style>` blocks that match
+  the selected element, each labelled with how many elements it affects. This is
+  where `.btn-primary`, `h1`–`h6` and `.input` live, and until now none of them
+  could be reached.
+
+Rule matching is asked of the real DOM rather than computed in the editor: the
+editor knows the markup, but only the browser knows what the cascade resolved
+to. Pseudo-class rules are matched on their bare selector, because
+`.btn-primary:hover` matches nothing while your pointer is over the panel — and
+those are precisely the rules you cannot otherwise reach. Matches are ordered
+most-specific first, so a universal reset matching 305 elements does not bury
+the rule you opened the panel to change.
+
+`:root` rules are deliberately excluded from this list: the Theme tab already
+owns those bytes, and indexing them twice would put two targets over one range,
+which the patch engine correctly treats as a collision.
+
 Live preview works by setting the property on the element, or the custom
 property on `<html>` — an inline custom property outranks the `:root` rule, so
 the page updates without its stylesheet being touched.

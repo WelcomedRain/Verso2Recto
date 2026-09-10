@@ -7,7 +7,7 @@ import type { ElementNode, StringEntry, TemplateIndex } from '../core/htmlIndex'
 import type { PendingChange } from '../core/publish';
 import type { EditTarget } from '../core/targets';
 import type { StyleDecl, ThemeToken } from '../core/css';
-import { StyleSections } from './StylePanel';
+import { StyleSections, type MatchedRule } from './StylePanel';
 import { ElementCodeEditor } from './CodeEditor';
 
 /* ------------------------------- Words ------------------------------- */
@@ -158,7 +158,7 @@ export function PicturesPanel({
 
 export function SelectionPanel({
   entry, index, change, valueOf, onEdit, onUndo, onShowCode,
-  element, decls, hoverDecls, targetsById, tokens, changes, hoverHeld, onHoldHover,
+  element, decls, hoverDecls, rules, targetsById, tokens, changes, hoverHeld, onHoldHover,
   elementSource, elementPending, onEditHtml, onRevertHtml,
 }: {
   entry: StringEntry | null;
@@ -171,6 +171,7 @@ export function SelectionPanel({
   element: ElementNode | null;
   decls: StyleDecl[];
   hoverDecls: StyleDecl[];
+  rules: MatchedRule[];
   targetsById: Map<string, EditTarget>;
   tokens: ThemeToken[];
   changes: Map<string, PendingChange>;
@@ -199,6 +200,7 @@ export function SelectionPanel({
       element={element}
       decls={decls}
       hoverDecls={hoverDecls}
+      rules={rules}
       valueOf={valueOf}
       onEdit={onEdit}
       changes={changes}

@@ -23,6 +23,9 @@ interface Props {
    * the one thing you cannot see.
    */
   forceHover: { elementId: string; decls: { prop: string; value: string }[] } | null;
+  /** Selectors to test against the selected element, in rule order. */
+  matchSelectors: string[];
+  onRulesMatched: (elementId: string, matches: { index: number; count: number }[]) => void;
   /** Edits pushed into the rendered page as the user types. */
   liveEdits: {
     kind: TargetKind;
@@ -34,7 +37,10 @@ interface Props {
   }[];
 }
 
-export function PageView({ fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover }: Props) {
+export function PageView({
+  fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover,
+  matchSelectors, onRulesMatched,
+}: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
   const [pane, setPane] = useState({ w: 0, h: 0 });
@@ -95,10 +101,23 @@ export function PageView({ fileText, index, onSelectElement, selectedElementId, 
       if (!m || typeof m !== 'object') return;
       if (m.type === 'recto:ready') setReady(true);
       if (m.type === 'recto:select') onSelectElement(m.elementId, m.runOrdinal);
+      if ((m as { type: string }).type === 'recto:rules-matched') {
+        const r = m as unknown as { elementId: string; matches: { index: number; count: number }[] };
+        onRulesMatched(r.elementId, r.matches);
+      }
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [onSelectElement]);
+  }, [onSelectElement, onRulesMatched]);
+
+  // Ask the page which rules govern the selected element. Only the browser can
+  // answer that; the editor knows the markup, not the resolved cascade.
+  useEffect(() => {
+    if (!ready || !selectedElementId || !matchSelectors.length) return;
+    frameRef.current?.contentWindow?.postMessage(
+      { type: 'recto:match-rules', elementId: selectedElementId, selectors: matchSelectors }, '*',
+    );
+  }, [ready, selectedElementId, matchSelectors]);
 
   // Push edits into the rendered page as they are typed.
   useEffect(() => {

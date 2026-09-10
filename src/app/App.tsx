@@ -122,6 +122,47 @@ export function App() {
     return src && state.bundle?.manifest[src] ? src : null;
   }, [state.index, state.bundle]);
 
+  /**
+   * Which stylesheet rules govern the selected element, answered by the page.
+   *
+   * Matching is asked of the real DOM rather than computed here: the editor
+   * knows the markup, but only the browser knows what the cascade resolved to.
+   * Pseudo-class rules are matched on their bare selector, since `.btn:hover`
+   * matches nothing while the pointer is over the panel — and those are exactly
+   * the rules you cannot otherwise reach.
+   */
+  const [ruleMatches, setRuleMatches] = useState<{ index: number; count: number }[]>([]);
+  const [matchedFor, setMatchedFor] = useState<string | null>(null);
+
+  const matchSelectors = useMemo(
+    () => (state.targets?.rules ?? []).map((r) => r.matchSelector),
+    [state.targets],
+  );
+
+  const onRulesMatched = useCallback((elementId: string, matches: { index: number; count: number }[]) => {
+    setMatchedFor(elementId);
+    setRuleMatches(matches);
+  }, []);
+
+  // Drop stale answers the moment the selection moves, or the panel would show
+  // the previous element's rules as if they were this one's.
+  useEffect(() => {
+    setRuleMatches([]);
+    setMatchedFor(null);
+  }, [state.selection.elementId]);
+
+  const matchingRules = useMemo(() => {
+    if (matchedFor !== state.selection.elementId) return [];
+    const rules = state.targets?.rules ?? [];
+    return ruleMatches
+      .map((m) => ({ rule: rules[m.index], count: m.count }))
+      .filter((x) => x.rule)
+      // Most specific first. A universal reset legitimately matches, but
+      // `*, *::before, *::after` at 305 elements is not what anyone opened this
+      // panel to change, and leaving it on top buries the rule that is.
+      .sort((a, b) => a.count - b.count);
+  }, [ruleMatches, matchedFor, state.selection.elementId, state.targets]);
+
   const forceHover = useMemo(
     () => (hoverHeld && state.selection.elementId
       ? {
@@ -383,6 +424,8 @@ export function App() {
                 selectedElementId={state.selection.elementId}
                 liveEdits={liveEdits}
                 forceHover={forceHover}
+                matchSelectors={matchSelectors}
+                onRulesMatched={onRulesMatched}
               />
             )}
             {mode !== 'page' && state.bundle && (
@@ -421,6 +464,7 @@ export function App() {
               element={selectedElement}
               decls={selectedDecls}
               hoverDecls={selectedHover}
+              rules={matchingRules}
               hoverHeld={hoverHeld}
               onHoldHover={setHoverHeld}
               valueOf={ed.valueOf}
@@ -473,6 +517,7 @@ export function App() {
               element={selectedElement}
               decls={selectedDecls}
               hoverDecls={selectedHover}
+              rules={matchingRules}
               targetsById={state.targets?.byId ?? new Map()}
               tokens={state.targets?.tokens ?? []}
               changes={state.changes}

@@ -67,49 +67,35 @@ function ValueField({
   );
 }
 
-/* -------------------------------- Style ------------------------------- */
+/* ---------------------- Shared: the style sections --------------------- */
 
-export function StylePanel({
+/**
+ * The declarations for one element, base and hover.
+ *
+ * Lives here but is rendered by the Selection panel as well. Clicking something
+ * in the page has to answer "what can I change about this?" in one place —
+ * sending you to a different tab to find out is the tool declining to help.
+ */
+export function StyleSections({
   element, decls, hoverDecls, valueOf, onEdit, changes, targetsById, tokens,
-  hoverHeld, onHoldHover,
+  hoverHeld, onHoldHover, compact,
 }: Common & {
   element: ElementNode | null;
   decls: StyleDecl[];
   hoverDecls: StyleDecl[];
   hoverHeld: boolean;
   onHoldHover: (hold: boolean) => void;
+  compact?: boolean;
 }) {
   const [showAll, setShowAll] = useState(false);
 
   const { featured, rest } = useMemo(() => {
     const f: StyleDecl[] = [];
     const r: StyleDecl[] = [];
-    for (const d of decls) {
-      (FEATURED_PROPS.includes(d.prop as never) ? f : r).push(d);
-    }
+    for (const d of decls) (FEATURED_PROPS.includes(d.prop as never) ? f : r).push(d);
     f.sort((a, b) => FEATURED_PROPS.indexOf(a.prop as never) - FEATURED_PROPS.indexOf(b.prop as never));
     return { featured: f, rest: r };
   }, [decls]);
-
-  if (!element) {
-    return (
-      <div className="panel">
-        <div className="empty">Click something in the page to change how it looks.</div>
-      </div>
-    );
-  }
-
-  if (!decls.length && !hoverDecls.length) {
-    return (
-      <div className="panel">
-        <div className="label">{element.tag}</div>
-        <div className="empty">
-          This element has no styling of its own — it inherits from the page, or from the
-          theme. Change the matching value in the Theme tab to affect it.
-        </div>
-      </div>
-    );
-  }
 
   const row = (d: StyleDecl) => {
     const target = targetsById.get(d.id);
@@ -131,13 +117,36 @@ export function StylePanel({
     );
   };
 
-  return (
-    <div className="panel">
-      <div className="label">
-        {element.tag} · {decls.length} propert{decls.length === 1 ? 'y' : 'ies'}
+  if (!element) return null;
+
+  if (!decls.length && !hoverDecls.length) {
+    return (
+      <div className="empty">
+        This element has no styling of its own — it inherits from the page, or from the
+        theme. Change the matching value in the Theme tab to affect it.
       </div>
+    );
+  }
+
+  return (
+    <>
+      {!compact && (
+        <div className="label">
+          {element.tag} · {decls.length} propert{decls.length === 1 ? 'y' : 'ies'}
+        </div>
+      )}
+      {compact && <div className="label">How it looks</div>}
 
       {featured.map(row)}
+
+      {rest.length > 0 && (
+        <>
+          <button className="btn btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setShowAll((v) => !v)}>
+            {showAll ? 'Hide' : `Show ${rest.length} more`}
+          </button>
+          {showAll && rest.map(row)}
+        </>
+      )}
 
       {hoverDecls.length > 0 && (
         <div className="stack" style={{ gap: 8, borderTop: '2px solid var(--color-divider)', paddingTop: 12 }}>
@@ -159,16 +168,29 @@ export function StylePanel({
           {hoverDecls.map(row)}
         </div>
       )}
+    </>
+  );
+}
 
-      {rest.length > 0 && (
-        <>
-          <button className="btn btn-ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setShowAll((v) => !v)}>
-            {showAll ? 'Hide' : `Show ${rest.length} more`}
-          </button>
-          {showAll && rest.map(row)}
-        </>
-      )}
+/* -------------------------------- Style ------------------------------- */
 
+export function StylePanel(props: Common & {
+  element: ElementNode | null;
+  decls: StyleDecl[];
+  hoverDecls: StyleDecl[];
+  hoverHeld: boolean;
+  onHoldHover: (hold: boolean) => void;
+}) {
+  if (!props.element) {
+    return (
+      <div className="panel">
+        <div className="empty">Click something in the page to change how it looks.</div>
+      </div>
+    );
+  }
+  return (
+    <div className="panel">
+      <StyleSections {...props} />
       <div className="empty">
         A value like <span className="mono">var(--gold)</span> comes from the theme. Change it
         here and only this element moves; change it in Theme and everything using it moves.

@@ -1,8 +1,11 @@
 import { useMemo } from 'react';
 import type { AssetInfo, Bundle } from '../core/bundle';
 import { assetDataUrl } from '../core/bundle';
-import type { StringEntry, TemplateIndex } from '../core/htmlIndex';
+import type { ElementNode, StringEntry, TemplateIndex } from '../core/htmlIndex';
 import type { PendingChange } from '../core/publish';
+import type { EditTarget } from '../core/targets';
+import type { StyleDecl, ThemeToken } from '../core/css';
+import { StyleSections } from './StylePanel';
 
 const fmtBytes = (b: number) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
 
@@ -92,19 +95,56 @@ export function PicturesPanel({
 
 export function SelectionPanel({
   entry, index, change, valueOf, onEdit, onUndo, onShowCode,
+  element, decls, hoverDecls, targetsById, tokens, changes, hoverHeld, onHoldHover,
 }: {
   entry: StringEntry | null;
   index: TemplateIndex;
   change: PendingChange | undefined;
-  valueOf: (s: StringEntry) => string;
+  valueOf: ((s: StringEntry) => string) & ((t: EditTarget) => string);
   onEdit: (id: string, v: string) => void;
   onUndo: (id: string) => void;
   onShowCode: () => void;
+  element: ElementNode | null;
+  decls: StyleDecl[];
+  hoverDecls: StyleDecl[];
+  targetsById: Map<string, EditTarget>;
+  tokens: ThemeToken[];
+  changes: Map<string, PendingChange>;
+  hoverHeld: boolean;
+  onHoldHover: (hold: boolean) => void;
 }) {
+  const styling = (
+    <StyleSections
+      compact
+      element={element}
+      decls={decls}
+      hoverDecls={hoverDecls}
+      valueOf={valueOf}
+      onEdit={onEdit}
+      changes={changes}
+      targetsById={targetsById}
+      tokens={tokens}
+      hoverHeld={hoverHeld}
+      onHoldHover={onHoldHover}
+    />
+  );
+
   if (!entry) {
+    // No editable words, but the element may still be worth styling — which is
+    // the usual case for a button or an image.
     return (
       <div className="panel">
-        <div className="empty">Click any words in the page on the left.</div>
+        {element ? (
+          <>
+            <div className="label">{element.tag} · no words of its own</div>
+            {styling}
+            <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={onShowCode}>
+              Show me the code
+            </button>
+          </>
+        ) : (
+          <div className="empty">Click anything in the page on the left.</div>
+        )}
       </div>
     );
   }
@@ -142,6 +182,10 @@ export function SelectionPanel({
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button className="btn" onClick={onShowCode}>Show me the code</button>
         {change && <button className="btn" onClick={() => onUndo(entry.id)}>Undo</button>}
+      </div>
+
+      <div style={{ borderTop: '2px solid var(--color-divider)', paddingTop: 12 }} className="stack">
+        {styling}
       </div>
     </div>
   );

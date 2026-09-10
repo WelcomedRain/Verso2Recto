@@ -45,26 +45,39 @@ function lineTokens(line: string): Tok[] {
   return out;
 }
 
-/** Long single-line templates are unreadable; soft-wrap them into chunks. */
-const CHUNK = 160;
+/**
+ * Turn the template into display lines.
+ *
+ * The page is one 58 KB line with no newlines in it, so the file's own line
+ * structure is useless here. Real lines are kept where they exist; anything
+ * longer than a screenful is decomposed at tag boundaries, which is where an
+ * HTML reader expects a break anyway. Offsets are carried through so a byte
+ * range still resolves to the right line.
+ *
+ * Display only. Nothing here is ever written back.
+ */
+const MAX_LINE = 400;
 
 function toLines(text: string): { text: string; offset: number }[] {
   const out: { text: string; offset: number }[] = [];
   let offset = 0;
+
   for (const raw of text.split('\n')) {
-    if (raw.length <= CHUNK) {
+    if (raw.length <= MAX_LINE) {
       out.push({ text: raw, offset });
       offset += raw.length + 1;
       continue;
     }
+    // Break before each '<' so every line starts with a tag.
     let i = 0;
     while (i < raw.length) {
-      // Break at a tag boundary when one is nearby, so a line is meaningful.
-      let cut = raw.lastIndexOf('><', i + CHUNK);
-      if (cut <= i) cut = Math.min(raw.length, i + CHUNK) - 1;
-      const slice = raw.slice(i, cut + 1);
-      out.push({ text: slice, offset: offset + i });
-      i = cut + 1;
+      let next = raw.indexOf('<', i + 1);
+      if (next === -1) next = raw.length;
+      // A single tag longer than the cap (a huge style attribute) still has to
+      // break somewhere; break it hard rather than let one line run for pages.
+      if (next - i > MAX_LINE) next = i + MAX_LINE;
+      out.push({ text: raw.slice(i, next), offset: offset + i });
+      i = next;
     }
     offset += raw.length + 1;
   }

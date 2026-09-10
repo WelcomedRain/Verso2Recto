@@ -249,7 +249,16 @@ button:disabled { cursor: default; opacity: 0.4; }
 
 /* ---- centre ---- */
 
-.centre { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.centre {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* Lets the panes below react to THIS column's width rather than the
+     viewport's. The centre column is roughly viewport minus 440px, so a
+     viewport media query would stack them at the wrong moment. */
+  container-type: inline-size;
+}
 
 .toolbar {
   height: 44px;
@@ -279,7 +288,23 @@ button:disabled { cursor: default; opacity: 0.4; }
 .seg button:not(.on):hover { background: var(--hover); }
 .seg.dark button.on { background: var(--color-text); color: var(--color-bg); }
 
-.panes { display: flex; flex: 1 1 0; min-height: 0; flex-wrap: wrap; }
+.panes {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  /* Never wrap. A wrapped flex row inside a fixed-height grid cell overflows
+     it, which pushed the header and toolbar off the top of the app entirely. */
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* Below roughly 860px of column there is not enough room for two panes side by
+   side — 430px each is the floor — so they stack and each scrolls itself. */
+@container (max-width: 860px) {
+  .panes.split { flex-direction: column; }
+  .panes.split > * { flex: 1 1 50%; min-height: 0; min-width: 0; }
+  .panes.split .code-view { border-left: 0; border-top: 2px solid var(--color-divider); }
+}
 
 .page-view { display: flex; flex-direction: column; flex: 1 1 430px; min-width: 0; min-height: 0; padding: 10px; gap: 8px; }
 

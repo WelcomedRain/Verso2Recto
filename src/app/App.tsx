@@ -361,24 +361,23 @@ export function App() {
           )}
 
           {tab === 'selection' && idx && (
-            selectedEntry || !state.selection.elementId ? (
-              <SelectionPanel
-                entry={selectedEntry}
-                index={idx}
-                change={selectedEntry ? state.changes.get(selectedEntry.id) : undefined}
-                valueOf={ed.valueOf}
-                onEdit={ed.edit}
-                onUndo={ed.undo}
-                onShowCode={() => setMode('split')}
-              />
-            ) : (
-              <div className="panel">
-                <div className="empty">
-                  That part of the page has no words of its own — it is a container holding
-                  other things. Click the words themselves, or pick them from the Words list.
-                </div>
-              </div>
-            )
+            <SelectionPanel
+              entry={selectedEntry}
+              index={idx}
+              change={selectedEntry ? state.changes.get(selectedEntry.id) : undefined}
+              valueOf={ed.valueOf}
+              onEdit={editWithHover}
+              onUndo={ed.undo}
+              onShowCode={() => setMode('split')}
+              element={selectedElement}
+              decls={selectedDecls}
+              hoverDecls={selectedHover}
+              targetsById={state.targets?.byId ?? new Map()}
+              tokens={state.targets?.tokens ?? []}
+              changes={state.changes}
+              hoverHeld={hoverHeld}
+              onHoldHover={setHoverHeld}
+            />
           )}
         </aside>
       </div>

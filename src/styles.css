@@ -508,3 +508,54 @@ button:disabled { cursor: default; opacity: 0.4; }
   opacity: 0;
   cursor: pointer;
 }
+
+/* ---- window controls overlay ----
+
+   When the app is installed with an overlaid title bar, the page extends up
+   into it and we draw the caption ourselves. `env(titlebar-area-*)` describes
+   the strip that is ours: it stops short of the system buttons, which the
+   browser still draws and colours from theme_color.
+
+   Driven by a class rather than only `@media (display-mode: window-controls-
+   overlay)` so the layout can be exercised outside an installed window. The
+   media query is not testable in a browser tab, and untestable layout is how
+   you ship a broken title bar. */
+
+.titlebar { display: none; }
+
+.shell.wco {
+  grid-template-rows: env(titlebar-area-height, 33px) 56px minmax(0, 1fr) 36px;
+}
+
+.shell.wco .titlebar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--color-accent);
+  color: #fff;
+  height: env(titlebar-area-height, 33px);
+  /* Start where the strip starts and stop where the buttons begin, or the
+     wordmark ends up underneath minimise. */
+  margin-left: env(titlebar-area-x, 0px);
+  width: env(titlebar-area-width, 100%);
+  padding: 0 12px;
+  overflow: hidden;
+  /* The whole strip drags the window, the way a title bar should. */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.shell.wco .titlebar .mark {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+/* The bullet is the accent, which is invisible on an accent ground — the mark
+   goes monochrome white here rather than losing its middle. */
+.shell.wco .titlebar .mark .brand-dot { color: #fff; }
+
+/* The in-app header keeps everything except the brand, which has moved up. */
+.shell.wco .header .brand { display: none; }

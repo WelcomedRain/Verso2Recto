@@ -67,9 +67,15 @@ export default defineConfig({
         // tint orange against an orange-red bar. WCAG contrast maths predicts
         // Chrome's behaviour here, not Vivaldi's — check the real window
         // before changing this.
-        theme_color: '#c92a10',
+        theme_color: '#ec3013',
         background_color: '#f3f2f2',
         display: 'standalone',
+        // The app draws its own title bar. Without this the browser paints the
+        // caption, and it picks the text and the window buttons as one colour
+        // from theme_color — so a bright orange bar forces black text. Drawing
+        // it ourselves means the wordmark is white on the real accent, and only
+        // the three system buttons follow theme_color.
+        display_override: ['window-controls-overlay', 'standalone'],
         start_url: base,
         scope: base,
         icons: [

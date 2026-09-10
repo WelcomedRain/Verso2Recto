@@ -38,6 +38,25 @@ export function App() {
   const [syncBusy, setSyncBusy] = useState(false);
   const [hoverHeld, setHoverHeld] = useState(false);
 
+  /**
+   * Whether the installed window handed us its title bar.
+   *
+   * Also settable by hand for testing: an installed window is the one thing
+   * that cannot be reproduced in a browser tab, so the layout would otherwise
+   * ship unverified.
+   */
+  const [wco, setWco] = useState(false);
+  useEffect(() => {
+    const wcoApi = (navigator as Navigator & {
+      windowControlsOverlay?: { visible: boolean; addEventListener: (t: string, f: () => void) => void };
+    }).windowControlsOverlay;
+    (window as Window & { __rectoForceWco?: (v: boolean) => void }).__rectoForceWco = setWco;
+    if (!wcoApi) return;
+    const sync = () => setWco(wcoApi.visible);
+    sync();
+    wcoApi.addEventListener('geometrychange', sync);
+  }, []);
+
   // A new build is fetched in the background but never applied underneath an
   // edit in progress. Say it is ready; let the reload happen on request.
   const { needRefresh: [updateReady], updateServiceWorker } = useRegisterSW();
@@ -229,7 +248,14 @@ export function App() {
   const idx = state.index;
 
   return (
-    <div className="shell">
+    <div className={`shell ${wco ? 'wco' : ''}`}>
+      {/* The title bar we draw ourselves when the window gives us one. */}
+      <div className="titlebar">
+        <span className="mark">
+          RECTO<span className="brand-dot">&bull;</span>VERITAS
+        </span>
+      </div>
+
       {/* ---------------- header ---------------- */}
       <header className="header">
         <div className="brand">

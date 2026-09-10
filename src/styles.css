@@ -133,12 +133,20 @@ button:disabled { cursor: default; opacity: 0.4; }
 }
 
 .brand { display: flex; align-items: center; gap: 8px; }
-.brand-mark { width: 12px; height: 12px; background: var(--color-accent); }
 .brand-name {
   font-family: var(--font-heading);
   font-weight: 800;
   font-size: 17px;
-  letter-spacing: -0.02em;
+  /* Positive tracking: all-caps needs air. The -0.02em this used to carry is a
+     mixed-case setting and left the letters crowding each other. */
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+/* A bullet, not a middle dot. U+00B7 sits on the mathematical centre, which is
+   below the optical centre of a row of caps, and is too light against 800. */
+.brand-dot {
+  color: var(--color-accent);
+  padding: 0 0.30em;
 }
 
 .rule-v { width: 2px; height: 22px; background: var(--color-divider); }

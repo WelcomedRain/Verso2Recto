@@ -139,8 +139,11 @@ export function App() {
       {/* ---------------- header ---------------- */}
       <header className="header">
         <div className="brand">
-          <span className="brand-mark" />
-          <span className="brand-name">RECTOVERITAS</span>
+          {/* The accent lives inside the name rather than beside it: one mark
+              doing two jobs, separator and brand. */}
+          <span className="brand-name">
+            RECTO<span className="brand-dot">&bull;</span>VERITAS
+          </span>
         </div>
         <span className="rule-v" />
         <button className="source-btn" onClick={() => setShowSource(true)}>

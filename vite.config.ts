@@ -55,12 +55,12 @@ export default defineConfig({
       // interrupt an edit in progress. Prompting says what happened and lets
       // the reload happen when it suits.
       registerType: 'prompt',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon-32.png'],
       manifest: {
         name: 'RectoVeritas',
         short_name: 'RectoVeritas',
         description: 'Edit a GitHub-hosted site offline, then publish with one button.',
-        theme_color: '#ec3013',
+        theme_color: '#201e1d',
         background_color: '#f3f2f2',
         display: 'standalone',
         start_url: base,
@@ -68,7 +68,9 @@ export default defineConfig({
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          // Separate artwork: a maskable icon is cropped to a circle, so the
+          // mark is drawn smaller to survive it rather than losing its corners.
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {

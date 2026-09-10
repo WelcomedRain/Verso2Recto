@@ -80,6 +80,29 @@ export function App() {
     ? state.changes.get(`html:${selectedElement.id}`)?.nextValue ?? null
     : null;
 
+  /**
+   * Which element in the page shows a given asset.
+   *
+   * The template references assets by bare UUID in `src`, so this is a direct
+   * lookup rather than a guess.
+   */
+  const imageElementFor = useCallback((uuid: string): string | null => {
+    const els = state.index?.elements ?? [];
+    for (const el of els) {
+      if (el.attrs.some((a) => (a.name === 'src' || a.name === 'href') && a.value === uuid)) {
+        return el.id;
+      }
+    }
+    return null;
+  }, [state.index]);
+
+  /** And the reverse: the asset an element shows, so clicking it opens Images. */
+  const assetForElement = useCallback((elementId: string): string | null => {
+    const el = state.index?.byId.get(elementId);
+    const src = el?.attrs.find((a) => a.name === 'src')?.value;
+    return src && state.bundle?.manifest[src] ? src : null;
+  }, [state.index, state.bundle]);
+
   const forceHover = useMemo(
     () => (hoverHeld && state.selection.elementId
       ? {
@@ -99,6 +122,13 @@ export function App() {
     if (!idx) return;
     const candidates = idx.strings.filter((s) => s.elementId === elementId && s.kind === 'text');
     const hit = candidates.find((s) => s.runOrdinal === runOrdinal) ?? candidates[0];
+    const asset = assetForElement(elementId);
+    if (asset) {
+      setSelectedAsset(asset);
+      ed.select(null, elementId);
+      setTab((t) => (t === 'style' || t === 'theme' ? t : 'pictures'));
+      return;
+    }
     if (hit) {
       ed.select(hit.id, elementId);
       // Keep the styling tabs put when the user is working on styling; jumping
@@ -110,7 +140,7 @@ export function App() {
       ed.select(null, elementId);
       setTab((t) => (t === 'style' || t === 'theme' ? t : 'selection'));
     }
-  }, [ed]);
+  }, [ed, assetForElement]);
 
   const liveEdits = useMemo(
     () => ed.changeList.flatMap((c): LiveEdit[] => {
@@ -387,7 +417,18 @@ export function App() {
               assets={state.assets}
               bundle={state.bundle}
               selectedUuid={selectedAsset}
-              onSelect={setSelectedAsset}
+              onSelect={(uuid) => {
+                setSelectedAsset(uuid);
+                // Selecting an image should show you where it is, not just
+                // that it exists.
+                const elId = imageElementFor(uuid);
+                if (elId) ed.select(null, elId);
+              }}
+              onReplace={async (uuid, file) => {
+                const buf = new Uint8Array(await file.arrayBuffer());
+                return ed.replaceImage(uuid, buf, file.type || 'image/png');
+              }}
+              usedByElement={imageElementFor}
             />
           )}
 

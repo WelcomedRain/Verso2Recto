@@ -166,10 +166,29 @@ A code edit supersedes anything queued inside the element it replaces, since
 the new markup is the more recent and more specific statement of intent. The
 app says so when it happens rather than dropping the work quietly.
 
+## Images
+
+The six images are base64 in the asset manifest, keyed by UUID, and the page
+references them by that bare UUID. So replacing one is a manifest write and
+nothing else — no markup change, no reference to rewrite, and no change to the
+site's own source. The design brief said these needed a rebuild; they do not.
+
+Selection works both ways: click an image in the page and Images opens with it
+selected; click a row and it is found and outlined in the page. The lookup uses
+the source, not the DOM, because the runtime rewrites each `src` to a blob URL
+when it renders.
+
+Dimensions are read from the image's own header bytes, so they are its real
+size rather than however the page displays it. A fixed small prefix is not
+enough: one asset carries a 5,769-byte C2PA provenance block that puts its
+frame header at byte 6,403, so the prefix grows until the header is found.
+
+There is no original filename to show. The exporter stores each asset as
+`{ mime, compressed, data }` under a UUID and keeps no name, so the editor
+shows the id and says so rather than inventing something friendlier.
+
 ## What's next
 
-- **Image replacement** — the 6 images are base64 in the manifest, keyed by UUID
-  and referenced by bare UUID in the template. Swapping one is a manifest write.
 - **Offline queue drain** — publish while offline currently completes steps 1–4
   and holds; it does not yet publish itself on reconnect.
 - **Re-applying after an export** — orphaned edits are already detected and

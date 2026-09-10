@@ -1,14 +1,14 @@
 import { useMemo } from 'react';
 import type { AssetInfo, Bundle } from '../core/bundle';
 import { assetDataUrl } from '../core/bundle';
+import { imageSizeFromBase64, formatSize } from '../core/imageMeta';
+import { useRef, useState } from 'react';
 import type { ElementNode, StringEntry, TemplateIndex } from '../core/htmlIndex';
 import type { PendingChange } from '../core/publish';
 import type { EditTarget } from '../core/targets';
 import type { StyleDecl, ThemeToken } from '../core/css';
 import { StyleSections } from './StylePanel';
 import { ElementCodeEditor } from './CodeEditor';
-
-const fmtBytes = (b: number) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
 
 /* ------------------------------- Words ------------------------------- */
 
@@ -55,38 +55,100 @@ export function WordsPanel({
 /* ------------------------------ Pictures ----------------------------- */
 
 export function PicturesPanel({
-  assets, bundle, selectedUuid, onSelect,
+  assets, bundle, selectedUuid, onSelect, onReplace, usedByElement,
 }: {
   assets: AssetInfo[];
   bundle: Bundle;
   selectedUuid: string | null;
   onSelect: (uuid: string) => void;
+  onReplace: (uuid: string, file: File) => Promise<{ ok: boolean; message: string }>;
+  /** Element id in the page that shows this image, when there is one. */
+  usedByElement: (uuid: string) => string | null;
 }) {
   const images = useMemo(() => assets.filter((a) => a.kind === 'image'), [assets]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Dimensions come from the header bytes, so they are the image's real size
+  // rather than however the page happens to display it.
+  const sizes = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of images) {
+      m.set(a.uuid, formatSize(imageSizeFromBase64(bundle.manifest[a.uuid].data)));
+    }
+    return m;
+  }, [images, bundle]);
+
+  const pick = (uuid: string) => {
+    setResult(null);
+    onSelect(uuid);
+    const input = fileRef.current;
+    if (!input) return;
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (!file) return;
+      setBusy(uuid);
+      setResult(await onReplace(uuid, file));
+      setBusy(null);
+    };
+    input.click();
+  };
+
   return (
     <div className="panel">
-      <div className="label">{images.length} pictures in this page</div>
-      {images.map((a) => (
-        <button
-          key={a.uuid}
-          className={`pic-row ${selectedUuid === a.uuid ? 'on' : ''}`}
-          onClick={() => onSelect(a.uuid)}
-        >
-          <img
-            src={assetDataUrl(bundle.manifest[a.uuid])}
-            alt=""
-            style={a.mime === 'image/png' ? { objectFit: 'contain' } : undefined}
-          />
-          <div style={{ minWidth: 0 }}>
-            <div className="name">{a.uuid.slice(0, 8)}…</div>
-            <div className="meta">{a.mime.replace('image/', '').toUpperCase()} · {fmtBytes(a.bytes)}</div>
-            <div className="use">used by {a.usedBy.join(', ') || 'nothing'} · in bundle</div>
+      <div className="label">{images.length} images in this page</div>
+      <input ref={fileRef} type="file" accept="image/*" hidden />
+
+      {result && (
+        <div className={result.ok ? 'was' : 'banner-err'}>{result.message}</div>
+      )}
+
+      {images.map((a) => {
+        const on = selectedUuid === a.uuid;
+        const inPage = usedByElement(a.uuid);
+        return (
+          <div key={a.uuid} className={`pic-row ${on ? 'on' : ''}`} style={{ flexWrap: 'wrap' }}>
+            <button
+              onClick={() => onSelect(a.uuid)}
+              style={{ display: 'flex', gap: 10, alignItems: 'center', flex: '1 1 auto', textAlign: 'left', minWidth: 0 }}
+              title={inPage ? 'Show where this is used' : 'Not shown in the page'}
+            >
+              <img
+                src={assetDataUrl(bundle.manifest[a.uuid])}
+                alt=""
+                style={a.mime === 'image/png' ? { objectFit: 'contain' } : undefined}
+              />
+              <span style={{ minWidth: 0 }}>
+                <span className="name" style={{ display: 'block' }}>{a.uuid.slice(0, 8)}…</span>
+                <span className="meta" style={{ display: 'block' }}>
+                  {sizes.get(a.uuid)} · {a.mime.replace('image/', '').toUpperCase()} ·{' '}
+                  {a.bytes > 1024 * 1024 ? `${(a.bytes / 1048576).toFixed(1)} MB` : `${Math.round(a.bytes / 1024)} KB`}
+                </span>
+                <span className="use" style={{ display: 'block' }}>
+                  {inPage ? 'click to find it in the page' : 'not shown in the page'}
+                </span>
+              </span>
+            </button>
+            {on && (
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: 11, padding: '5px 9px' }}
+                disabled={busy === a.uuid}
+                onClick={() => pick(a.uuid)}
+              >
+                {busy === a.uuid ? 'Replacing…' : 'Replace'}
+              </button>
+            )}
           </div>
-        </button>
-      ))}
+        );
+      })}
+
       <div className="empty">
-        These pictures live inside the page file rather than as separate files.
-        Replacing them is coming next; for now you can see what is there and where it is used.
+        These live inside the page file rather than as separate files, so replacing one
+        rewrites the file itself — no markup changes and no reference to update. The
+        exporter keeps no original filename, which is why each shows its id.
       </div>
     </div>
   );

@@ -6,10 +6,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { parseBundle, listAssets, type Bundle, type AssetInfo } from '../core/bundle';
+import { parseBundle, serializeBundle, listAssets, type Bundle, type AssetInfo } from '../core/bundle';
 import { indexTemplate, type TemplateIndex, type StringEntry } from '../core/htmlIndex';
 import { buildTargets, validate, type EditTarget, type TargetSet } from '../core/targets';
 import { outerRange } from '../core/htmlIndex';
+import { bytesToBase64, imageSizeFromBase64 } from '../core/imageMeta';
 import { GitHub, parseRepoInput, type RepoRef } from '../core/github';
 import { verifyHeadTags, type PendingChange } from '../core/publish';
 import { liveUrlFor, type DeployObservation } from '../core/deploy';
@@ -101,9 +102,13 @@ export function useEditor() {
     deploy: null,
   });
 
+  const stateRef = useRef<EditorState>(null as unknown as EditorState);
+
   const patch = useCallback((p: Partial<EditorState>) => {
     setState((s) => ({ ...s, ...p }));
   }, []);
+
+  stateRef.current = state;
 
   // Real connectivity, with a manual override kept for testing.
   const [manualOffline, setManualOffline] = useState(false);
@@ -461,6 +466,52 @@ export function useEditor() {
     });
   }, []);
 
+  /**
+   * Swap the bytes of an embedded image.
+   *
+   * The exporter stores assets as base64 in a JSON manifest keyed by UUID, and
+   * the page references them by that bare UUID. So a replacement is a manifest
+   * write and nothing else: no markup changes, no reference rewriting, and no
+   * change to the site's own source. The design brief claimed these were not
+   * replaceable without a rebuild; they are.
+   *
+   * Kept out of the change queue deliberately. Every other edit is a byte range
+   * in the template, and the queue's whole model is ranges; an asset is a value
+   * in the other payload. It applies to the working copy immediately and the
+   * publish pipeline serializes both payloads anyway.
+   */
+  const replaceImage = useCallback(async (
+    uuid: string,
+    bytes: Uint8Array,
+    mime: string,
+  ): Promise<{ ok: boolean; message: string }> => {
+    const s = stateRef.current;
+    if (!s.bundle || !s.source) return { ok: false, message: 'No site is open.' };
+    const entry = s.bundle.manifest[uuid];
+    if (!entry) return { ok: false, message: 'That image is not in this page.' };
+
+    const data = bytesToBase64(bytes);
+    const before = imageSizeFromBase64(entry.data);
+    const after = imageSizeFromBase64(data);
+    if (!after) {
+      return { ok: false, message: 'That file does not look like an image this page can use.' };
+    }
+
+    const manifest = { ...s.bundle.manifest, [uuid]: { ...entry, mime, data, compressed: false } };
+    const nextFile = serializeBundle(s.bundle, { manifest });
+    await db.putFile({ path: s.source.path, text: nextFile, sha: '' });
+    setState((cur) => ({ ...cur, ...openBundle(nextFile) }));
+
+    const differs = before && (before.width !== after.width || before.height !== after.height);
+    return {
+      ok: true,
+      message: differs
+        ? `Replaced. The new image is ${after.width} × ${after.height}, where the old one was ` +
+          `${before.width} × ${before.height} — the page may lay out differently.`
+        : `Replaced with a ${after.width} × ${after.height} image.`,
+    };
+  }, []);
+
   const undo = useCallback((targetId: string) => {
     setState((s) => {
       const changes = new Map(s.changes);
@@ -527,7 +578,7 @@ export function useEditor() {
 
   return {
     state, online, manualOffline, setManualOffline,
-    connect, checkRemote, applyRemote, keepLocal, dismissSync, editElementHtml,
+    connect, checkRemote, applyRemote, keepLocal, dismissSync, editElementHtml, replaceImage,
     edit, undo, select, commitPublished, disconnect, dropOrphans, setDeploy,
     valueOf, changeList, patch,
   };

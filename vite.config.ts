@@ -67,7 +67,7 @@ export default defineConfig({
         // tint orange against an orange-red bar. WCAG contrast maths predicts
         // Chrome's behaviour here, not Vivaldi's — check the real window
         // before changing this.
-        theme_color: '#ec3013',
+        theme_color: '#c92a10',
         background_color: '#f3f2f2',
         display: 'standalone',
         start_url: base,

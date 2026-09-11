@@ -443,6 +443,21 @@ button:disabled { cursor: default; opacity: 0.4; }
 .chip { border: 1px solid var(--color-divider); padding: 3px 7px; }
 .chip.dirty { border-color: var(--color-accent); background: var(--color-accent-100); color: var(--color-accent-800); }
 
+/* The standing fact that nothing here touches the live site. Quiet on purpose:
+   it is always true, so it must never compete with the things that change. */
+.chip.safe { border-color: var(--color-neutral-400); color: var(--color-neutral-700); }
+
+/* A switch he flipped himself, not a fault. Marked so it cannot be mistaken
+   for a dropped connection, and so it stays visible until he flips it back. */
+.chip.switched {
+  border-color: var(--color-neutral-800);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-900);
+}
+
+/* Work waiting to go out earns weight; a settled deployment state does not. */
+.footer-pending { color: var(--color-accent-800); font-weight: 600; }
+
 /* ---- dialogs ---- */
 
 .backdrop {

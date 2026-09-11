@@ -7,12 +7,13 @@ import { StylePanel, ThemePanel } from './StylePanel';
 import { SourceDialog, ConnectDialog, PublishDialog, SyncDialog } from './Dialogs';
 import { FileText, Image as ImageIcon } from './icons';
 import { publish, type Step, type PublishResult } from '../core/publish';
-import { verifyDeployment, deployLabel } from '../core/deploy';
+import { verifyDeployment } from '../core/deploy';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import * as db from '../core/db';
 import { outerRange, type StringEntry } from '../core/htmlIndex';
 import type { LiveEdit } from './preview';
 import { noteFor, summarise, type PreviewAck } from './previewable';
+import { statusLine } from './status';
 import { reportFit, makeItCover, makeItFitByHeight, type FitMeasurement, type SweepPoint } from '../core/fit';
 
 type Mode = 'page' | 'split' | 'code';
@@ -406,6 +407,14 @@ export function App() {
   }
 
   const dirty = ed.changeList.length;
+  const status = statusLine({
+    dirty,
+    networkUp: state.online,
+    manualOffline: ed.manualOffline,
+    liveUrl: state.source?.liveUrl,
+    deploy: state.deploy,
+    lastPush: state.lastPush,
+  });
   const idx = state.index;
 
   return (
@@ -463,7 +472,7 @@ export function App() {
         {/* sidebar */}
         <aside className="sidebar">
           <div>
-            <div className="label sidebar-label">Offline copy of the site</div>
+            <div className="label sidebar-label">The copy you are editing</div>
             {state.files.slice(0, 40).map((f) => {
               const isPage = f.path === state.activeFile;
               const isImg = /\.(png|jpe?g|gif|webp|svg)$/i.test(f.path);
@@ -703,17 +712,17 @@ export function App() {
       </div>
 
       {/* ---------------- footer ---------------- */}
+      {/* Three questions, three slots, always filled. See status.ts. */}
       <footer className="footer">
-        <span className={`chip ${dirty ? 'dirty' : ''}`}>
-          {online
-            ? dirty ? `Online · ${dirty} unpublished` : 'Online · everything published'
-            : `Offline · ${dirty} change${dirty === 1 ? '' : 's'} queued`}
+        <span className="chip safe" title="Nothing you do here reaches the live site until you publish.">
+          {status.mode}
         </span>
-        <span>
-          {dirty
-            ? 'Editing a copy — the live site is untouched'
-            : deployLabel(state.deploy, state.lastPush)}
-        </span>
+        <span className={dirty ? 'footer-pending' : undefined}>{status.pending}</span>
+        {status.connection && (
+          <span className={`chip ${status.connection.tone === 'switched' ? 'switched' : 'dirty'}`}>
+            {status.connection.text}
+          </span>
+        )}
         {updateReady && (
           <button
             className="chip dirty"
@@ -724,7 +733,6 @@ export function App() {
             Update ready · reload
           </button>
         )}
-        <span style={{ marginLeft: updateReady ? 12 : 'auto' }}>Installed as an app</span>
       </footer>
 
       {/* ---------------- dialogs ---------------- */}

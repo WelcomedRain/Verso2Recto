@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { frameSizing, fillZoom, DEVICE_WIDTH, buildPreviewDoc } from './preview';
 import { indexTemplate } from '../core/htmlIndex';
 import { parseBundle } from '../core/bundle';
@@ -43,10 +43,14 @@ describe('the injected bridge', () => {
     }
   });
 
-  it('does not leak the bridge into the published page', () => {
+  // Against the real export, and skipped when it is not on this machine — the
+  // same rule the rest of the suite follows. A synthetic fixture here would
+  // hide format drift, which is the whole risk.
+  const REAL = 'G:/Anthea-Solve/index.html';
+  it.skipIf(!existsSync(REAL))('does not leak the bridge into the published page', () => {
     // The tagged document is a preview artefact. If it ever reached the
     // publish path the site would ship an editor inside itself.
-    const file = readFileSync('G:/Anthea-Solve/index.html', 'utf8');
+    const file = readFileSync(REAL, 'utf8');
     const doc = buildPreviewDoc(file, indexTemplate(parseBundle(file).template));
     expect(doc).toContain('__recto_bridge_style');
     expect(file).not.toContain('__recto_bridge_style');

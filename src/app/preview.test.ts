@@ -1,5 +1,57 @@
 import { describe, it, expect } from 'vitest';
-import { frameSizing, fillZoom, DEVICE_WIDTH } from './preview';
+import { readFileSync } from 'node:fs';
+import { frameSizing, fillZoom, DEVICE_WIDTH, buildPreviewDoc } from './preview';
+import { indexTemplate } from '../core/htmlIndex';
+import { parseBundle } from '../core/bundle';
+
+/**
+ * The bridge is a string, so TypeScript cannot see inside it.
+ *
+ * Two breakages proved the point within an hour of each other: a backtick in a
+ * comment silently ended the String.raw literal, and an apostrophe inside a
+ * single-quoted message ended the string. Neither failed the build. Both left
+ * the preview completely dead, with the app still compiling and 154 tests still
+ * passing.
+ */
+describe('the injected bridge', () => {
+  const source = readFileSync(new URL('./preview.ts', import.meta.url), 'utf8');
+
+  const bridgeJs = () => {
+    const m = source.match(/const BRIDGE = String\.raw`([\s\S]*?)\n`;/);
+    expect(m, 'could not find the BRIDGE literal').toBeTruthy();
+    return m![1].replace(/^[\s\S]*?<script>/, '').replace(/<\/script>[\s\S]*$/, '');
+  };
+
+  it('is syntactically valid JavaScript', () => {
+    expect(() => new Function(bridgeJs())).not.toThrow();
+  });
+
+  it('answers every message it is sent', () => {
+    // A handler that applies a change but never acknowledges it is the silent
+    // failure this feature exists to remove, so absence of an ack is a defect.
+    const js = bridgeJs();
+    const handled = [...js.matchAll(/m\.type === '(recto:[\w-]+)'/g)].map((x) => x[1]);
+    expect(handled.length).toBeGreaterThan(5);
+    // These change what is drawn, so each must report what it did.
+    for (const t of ['recto:set-text', 'recto:set-attr', 'recto:set-style',
+                     'recto:set-style-attr', 'recto:set-html', 'recto:set-rule',
+                     'recto:set-theme']) {
+      expect(handled, `${t} is not handled`).toContain(t);
+      const body = js.slice(js.indexOf(`m.type === '${t}'`));
+      const end = body.indexOf("m.type === 'recto:", 20);
+      expect(end === -1 ? body : body.slice(0, end)).toMatch(/ack\(/);
+    }
+  });
+
+  it('does not leak the bridge into the published page', () => {
+    // The tagged document is a preview artefact. If it ever reached the
+    // publish path the site would ship an editor inside itself.
+    const file = readFileSync('G:/Anthea-Solve/index.html', 'utf8');
+    const doc = buildPreviewDoc(file, indexTemplate(parseBundle(file).template));
+    expect(doc).toContain('__recto_bridge_style');
+    expect(file).not.toContain('__recto_bridge_style');
+  });
+});
 
 describe('frameSizing', () => {
   /**

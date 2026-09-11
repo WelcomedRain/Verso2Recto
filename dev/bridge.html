@@ -1,0 +1,169 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bridge harness</title>
+<style>
+  body { font: 13px/1.5 system-ui; margin: 16px; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #ccc; padding: 4px 6px; text-align: left; vertical-align: top; }
+  .pass { color: #0a6b2d; font-weight: 700; }
+  .fail { color: #c01705; font-weight: 700; }
+  iframe { width: 1280px; height: 700px; border: 1px solid #ccc; transform: scale(0.25); transform-origin: top left; }
+  .frame-box { height: 180px; overflow: hidden; }
+</style>
+<h1>Preview bridge harness</h1>
+<p>Drives the real bridge against the real site export and checks what it reports
+back. The bridge only exists inside a browser running the Claude Design runtime,
+so this is the only place its behaviour can be observed.</p>
+<div id="out">Loading the site…</div>
+<div class="frame-box"><iframe id="f"></iframe></div>
+
+<script type="module">
+import { buildPreviewDoc } from '/src/app/preview.ts';
+import { parseBundle } from '/src/core/bundle.ts';
+import { indexTemplate } from '/src/core/htmlIndex.ts';
+import { findRules } from '/src/core/css.ts';
+
+const out = document.getElementById('out');
+const frame = document.getElementById('f');
+
+const text = await fetch('/__sample.html').then((r) => r.text());
+const bundle = parseBundle(text);
+const index = indexTemplate(bundle.template);
+const rules = findRules(bundle.template, index);
+
+// Real things to aim at, chosen from the actual page rather than invented.
+const heading = index.strings.find((s) => s.kind === 'text' && s.tag === 'h1');
+const meta = index.strings.find((s) => s.kind === 'attr' && /og:|description/.test(s.tag));
+const plainRule = rules.find((r) => !r.state && !r.conditions.length && r.decls.length);
+const hoverRule = rules.find((r) => r.state === 'hover' && r.decls.length);
+const mediaRule = rules.find((r) => r.conditions.some((c) => /max-width/.test(c)) && r.decls.length);
+
+const acks = new Map();
+window.addEventListener('message', (e) => {
+  const m = e.data;
+  if (m && m.type === 'recto:applied') acks.set(m.id, m);
+});
+
+const doc = buildPreviewDoc(text, index);
+frame.src = URL.createObjectURL(new Blob([doc], { type: 'text/html' }));
+
+await new Promise((res) => {
+  const on = (e) => { if (e.data && e.data.type === 'recto:ready') { window.removeEventListener('message', on); res(); } };
+  window.addEventListener('message', on);
+});
+
+const send = (m) => frame.contentWindow.postMessage(m, '*');
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const cases = [];
+const probe = (name, msg, expect, note) => cases.push({ name, msg, expect, note });
+
+probe('visible text', {
+  type: 'recto:set-text', id: 'c-text',
+  elementId: heading?.elementId, runOrdinal: heading?.runOrdinal ?? 0, value: 'HARNESS HEADING',
+}, 'shown', heading ? heading.label : 'no h1 found');
+
+probe('text on an element that is not there', {
+  type: 'recto:set-text', id: 'c-gone', elementId: 'no-such-element', runOrdinal: 0, value: 'x',
+}, 'missing', 'the orphan case');
+
+probe('a share / SEO tag', {
+  type: 'recto:set-attr', id: 'c-meta',
+  elementId: meta?.elementId, attrName: meta?.attrName, value: 'harness',
+}, 'hidden', meta ? meta.label : 'no meta found');
+
+probe('style on a visible element', {
+  type: 'recto:set-style', id: 'c-style', elementId: heading?.elementId, prop: 'color', value: 'magenta',
+}, 'shown', '');
+
+probe('a stylesheet rule that matches', {
+  type: 'recto:set-rule', id: 'c-rule',
+  selector: plainRule?.selector, matchSelector: plainRule?.matchSelector,
+  conditions: [], state: null, prop: 'outline', value: '3px solid magenta',
+}, 'shown', plainRule ? plainRule.selector : 'none found');
+
+probe('a rule whose selector matches nothing', {
+  type: 'recto:set-rule', id: 'c-nomatch',
+  selector: '.harness-nothing', matchSelector: '.harness-nothing',
+  conditions: [], state: null, prop: 'color', value: 'magenta',
+}, 'hidden', 'must not claim to be showing');
+
+probe('a rule behind a media query that does not hold', {
+  type: 'recto:set-rule', id: 'c-media',
+  selector: plainRule?.selector, matchSelector: plainRule?.matchSelector,
+  conditions: ['@media (max-width: 320px)'], state: null, prop: 'color', value: 'magenta',
+}, 'hidden', 'the preview is 1280px wide');
+
+// Against a selector that really does match. The site's own `.btn-primary:hover`
+// matches nothing in the rendered page — the runtime rewrites those elements to
+// scoped `.scpN` classes — so using it here would test the no-match path twice
+// and never reach this one.
+probe('a :hover rule', {
+  type: 'recto:set-rule', id: 'c-hover',
+  selector: 'body:hover', matchSelector: 'body',
+  conditions: [], state: 'hover', prop: 'color', value: 'magenta',
+}, 'state', hoverRule ? `the page's own is ${hoverRule.selector}` : '');
+
+probe("a rule from the site's own stylesheet that matches nothing", {
+  type: 'recto:set-rule', id: 'c-dead',
+  selector: hoverRule?.selector ?? '.none:hover', matchSelector: hoverRule?.matchSelector ?? '.none',
+  conditions: hoverRule?.conditions ?? [], state: 'hover', prop: 'color', value: 'magenta',
+}, 'hidden', 'the runtime rewrote those elements to scoped classes');
+
+// The case the manual pass found: a rule that matches, is written correctly,
+// and changes nothing because the element styles itself. Acking 'shown' here
+// is the exact failure this whole feature exists to prevent.
+probe('a rule the elements own style already beats', {
+  type: 'recto:set-rule', id: 'c-beaten',
+  selector: 'h1', matchSelector: 'h1',
+  conditions: [], state: null, prop: 'font-size', value: '120px',
+}, 'hidden', 'this page sets font-size on the element itself');
+
+probe('a rule set to the value already being drawn', {
+  type: 'recto:set-rule', id: 'c-same',
+  selector: 'body', matchSelector: 'body',
+  conditions: [], state: null, prop: 'display', value: 'block',
+}, 'hidden', 'nothing to see, and no cause to claim');
+
+probe('replacing an element with markup', {
+  type: 'recto:set-html', id: 'c-html',
+  elementId: heading?.elementId, html: '<h1 style="color:magenta">HARNESS</h1>', assetRefs: {},
+}, 'shown', '');
+
+probe('replacing an element with something unparseable', {
+  type: 'recto:set-html', id: 'c-bad', elementId: heading?.elementId, html: 'no tags here', assetRefs: {},
+}, 'missing', 'the page must keep the original');
+
+for (const c of cases) send(c.msg);
+await wait(400);
+
+// The override sheet must actually carry what was written, and must drop it.
+const sheetOf = () => frame.contentDocument.getElementById('__recto_rules')?.textContent ?? '';
+const hadRule = sheetOf().includes('.harness-nothing');
+send({ type: 'recto:drop-rule', id: 'c-nomatch' });
+await wait(120);
+const droppedRule = !sheetOf().includes('.harness-nothing');
+const keptOthers = sheetOf().includes('@media (max-width: 320px)');
+
+let pass = 0, fail = 0;
+const rows = cases.map((c) => {
+  const got = acks.get(c.msg.id);
+  const ok = got && got.result === c.expect;
+  ok ? pass++ : fail++;
+  return `<tr><td>${c.name}</td><td>${c.expect}</td><td class="${ok ? 'pass' : 'fail'}">${got ? got.result : 'NO ACK'}</td>
+    <td>${c.note}</td><td>${got ? got.why : ''}</td></tr>`;
+}).join('');
+
+const extra = [
+  ['override sheet received the rule', hadRule],
+  ['drop-rule removed it', droppedRule],
+  ['drop-rule left the other rules alone', keptOthers],
+].map(([n, ok]) => {
+  ok ? pass++ : fail++;
+  return `<tr><td>${n}</td><td>true</td><td class="${ok ? 'pass' : 'fail'}">${ok}</td><td></td><td></td></tr>`;
+}).join('');
+
+out.innerHTML = `<h2 class="${fail ? 'fail' : 'pass'}">RESULT ${pass} passed, ${fail} failed</h2>
+  <table><tr><th>case</th><th>expected</th><th>got</th><th>note</th><th>the page's reason</th></tr>
+  ${rows}${extra}</table>`;
+</script>

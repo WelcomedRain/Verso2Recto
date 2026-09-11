@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Tablet, Smartphone, ZoomIn, ZoomOut } from './icons';
 import {
   buildPreviewDoc, DEVICE_WIDTH, ZOOM_STEPS, frameSizing,
-  type Device, type PreviewMessage,
+  type Device, type PreviewMessage, type LiveEdit,
 } from './preview';
 import type { TemplateIndex } from '../core/htmlIndex';
-import type { TargetKind } from '../core/targets';
+import type { PreviewAck } from './previewable';
 import type { FitMeasurement, SweepPoint } from '../core/fit';
 
 interface Props {
@@ -40,20 +40,21 @@ interface Props {
   originalStyleFor: (elementId: string) => string;
   onFitMeasured: (m: FitMeasurement) => void;
   /** Edits pushed into the rendered page as the user types. */
-  liveEdits: {
-    kind: TargetKind;
-    elementId: string;
-    runOrdinal: number;
-    attrName?: string;
-    prop?: string;
-    value: string;
-  }[];
+  liveEdits: LiveEdit[];
+  /**
+   * What the page reported back about each change it was asked to apply.
+   *
+   * The editor cannot tell whether an element is drawn at the current width or
+   * whether a selector matches anything, so this is the page answering rather
+   * than the editor guessing.
+   */
+  onApplied: (id: string, ack: PreviewAck) => void;
 }
 
 export function PageView({
   fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover,
   matchSelectors, onRulesMatched, measureFitFor, onFitMeasured, assetRefs,
-  sweepFor, onSwept, originalHtmlFor, originalStyleFor,
+  sweepFor, onSwept, originalHtmlFor, originalStyleFor, onApplied,
 }: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
@@ -115,6 +116,7 @@ export function PageView({
       if (!m || typeof m !== 'object') return;
       if (m.type === 'recto:ready') setReady(true);
       if (m.type === 'recto:select') onSelectElement(m.elementId, m.runOrdinal);
+      if (m.type === 'recto:applied') onApplied(m.id, { result: m.result, why: m.why });
       if ((m as { type: string }).type === 'recto:fit-measured') {
         onFitMeasured(m as unknown as FitMeasurement);
       }
@@ -125,7 +127,7 @@ export function PageView({
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [onSelectElement, onRulesMatched, onFitMeasured]);
+  }, [onSelectElement, onRulesMatched, onFitMeasured, onApplied]);
 
   useEffect(() => {
     if (!ready || !measureFitFor) return;
@@ -158,6 +160,7 @@ export function PageView({
    */
   const replaced = useRef<Set<string>>(new Set());
   const restyled = useRef<Set<string>>(new Set());
+  const ruled = useRef<Set<string>>(new Set());
 
   // Push edits into the rendered page as they are typed.
   useEffect(() => {
@@ -165,32 +168,55 @@ export function PageView({
     const w = frameRef.current?.contentWindow;
     if (!w) return;
     for (const e of liveEdits) {
+      const id = e.id;
       switch (e.kind) {
         case 'attr':
-          w.postMessage({ type: 'recto:set-attr', elementId: e.elementId, attrName: e.attrName, value: e.value }, '*');
+          w.postMessage({ type: 'recto:set-attr', id, elementId: e.elementId, attrName: e.attrName, value: e.value }, '*');
           break;
         case 'css-inline':
-          w.postMessage({ type: 'recto:set-style', elementId: e.elementId, prop: e.prop, value: e.value }, '*');
+          w.postMessage({ type: 'recto:set-style', id, elementId: e.elementId, prop: e.prop, value: e.value }, '*');
           break;
         case 'style-attr':
           restyled.current.add(e.elementId);
-          w.postMessage({ type: 'recto:set-style-attr', elementId: e.elementId, value: e.value }, '*');
+          w.postMessage({ type: 'recto:set-style-attr', id, elementId: e.elementId, value: e.value }, '*');
           break;
         case 'html':
           replaced.current.add(e.elementId);
-          w.postMessage({ type: 'recto:set-html', elementId: e.elementId, html: e.value, assetRefs }, '*');
+          w.postMessage({ type: 'recto:set-html', id, elementId: e.elementId, html: e.value, assetRefs }, '*');
           break;
         case 'css-hover':
           // Nothing to push: the runtime already consumed style-hover, so the
           // page cannot be told about a change to it. The forceHover hold
-          // renders the edited value instead.
+          // renders the edited value instead. previewable.ts says so in the UI
+          // rather than leaving the silence to be read as "that did nothing".
           break;
         case 'css-theme':
-          w.postMessage({ type: 'recto:set-theme', prop: e.prop, value: e.value }, '*');
+          w.postMessage({ type: 'recto:set-theme', id, prop: e.prop, value: e.value }, '*');
+          break;
+        case 'css-rule':
+          // Through an override sheet, because a rule belongs to no element.
+          // Until this existed a rule edit fell through to set-text and was
+          // posted at an empty element id, so it silently did nothing at all.
+          ruled.current.add(id);
+          w.postMessage({
+            type: 'recto:set-rule', id,
+            selector: e.selector, matchSelector: e.matchSelector,
+            conditions: e.conditions ?? [], state: e.ruleState ?? null,
+            prop: e.prop, value: e.value,
+          }, '*');
           break;
         default:
-          w.postMessage({ type: 'recto:set-text', elementId: e.elementId, runOrdinal: e.runOrdinal, value: e.value }, '*');
+          w.postMessage({ type: 'recto:set-text', id, elementId: e.elementId, runOrdinal: e.runOrdinal, value: e.value }, '*');
       }
+    }
+
+    // An undone rule edit sends nothing on its own, so the override sheet would
+    // keep showing it. Same reasoning as `replaced` and `restyled` below.
+    const liveRules = new Set(liveEdits.filter((e) => e.kind === 'css-rule').map((e) => e.id));
+    for (const id of [...ruled.current]) {
+      if (liveRules.has(id)) continue;
+      ruled.current.delete(id);
+      w.postMessage({ type: 'recto:drop-rule', id }, '*');
     }
     // Same for a scoped override: removing one sends nothing on its own.
     const styled = new Set(

@@ -11,18 +11,9 @@ import { verifyDeployment, deployLabel } from '../core/deploy';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import * as db from '../core/db';
 import { outerRange, type StringEntry } from '../core/htmlIndex';
-import type { TargetKind } from '../core/targets';
+import type { LiveEdit } from './preview';
+import { noteFor, summarise, type PreviewAck } from './previewable';
 import { reportFit, makeItCover, makeItFitByHeight, type FitMeasurement, type SweepPoint } from '../core/fit';
-
-/** One change, in the shape the preview bridge wants. */
-interface LiveEdit {
-  kind: TargetKind;
-  elementId: string;
-  runOrdinal: number;
-  attrName?: string;
-  prop?: string;
-  value: string;
-}
 
 type Mode = 'page' | 'split' | 'code';
 type Tab = 'words' | 'style' | 'theme' | 'pictures' | 'selection';
@@ -294,6 +285,7 @@ export function App() {
       // own identity in the change.
       if (c.kind === 'style-attr') {
         return [{
+          id: c.targetId,
           kind: 'style-attr',
           elementId: c.targetId.slice('override:'.length),
           runOrdinal: 0,
@@ -302,6 +294,7 @@ export function App() {
       }
       if (c.kind === 'html') {
         return [{
+          id: c.targetId,
           kind: 'html',
           elementId: c.targetId.slice('html:'.length),
           runOrdinal: 0,
@@ -310,16 +303,49 @@ export function App() {
       }
       const t = state.targets?.byId.get(c.targetId);
       if (!t) return [];
+      // A stylesheet rule is previewed by re-declaring it, so the bridge needs
+      // the selector and any enclosing conditions, not just the value.
+      const rule = t.kind === 'css-rule'
+        ? state.targets?.rules.find((r) => c.targetId.startsWith(`${r.id}:`))
+        : undefined;
       return [{
+        id: c.targetId,
         kind: t.kind,
         elementId: t.elementId ?? '',
         runOrdinal: t.runOrdinal ?? 0,
         attrName: t.attrName,
         prop: t.prop,
         value: c.nextValue,
+        selector: rule?.selector,
+        matchSelector: rule?.matchSelector,
+        conditions: rule?.conditions,
+        ruleState: rule?.state ?? null,
       }];
     }),
     [ed.changeList, state.targets],
+  );
+
+  /**
+   * What the page said about each change it was asked to apply.
+   *
+   * Held here rather than in the store because it describes the preview, not
+   * the working copy: it is true of this window at this width, and says nothing
+   * about whether the change will publish.
+   */
+  const [acks, setAcks] = useState<Map<string, PreviewAck>>(new Map());
+  const onApplied = useCallback((id: string, ack: PreviewAck) => {
+    setAcks((prev) => {
+      const was = prev.get(id);
+      if (was && was.result === ack.result && was.why === ack.why) return prev;
+      const next = new Map(prev);
+      next.set(id, ack);
+      return next;
+    });
+  }, []);
+
+  const preview = useMemo(
+    () => summarise(ed.changeList.map((c) => noteFor(c, acks.get(c.targetId)))),
+    [ed.changeList, acks],
   );
 
   /**
@@ -471,6 +497,30 @@ export function App() {
                 </div>
               </div>
 
+              {mode !== 'code' && preview.headline && (
+                <div className="card warn">
+                  <div className="card-title">Not showing in the page</div>
+                  <div className="card-body">
+                    <b>{preview.headline}</b>
+                    <div style={{ marginTop: 4 }}>
+                      {preview.unseen > 0
+                        ? 'They are queued and will publish exactly as written. The preview '
+                          + 'just cannot show them here.'
+                        : 'They are queued and will publish exactly as written.'}
+                    </div>
+                    <ul className="unseen">
+                      {preview.notes.map((n) => (
+                        <li key={n.id}>
+                          <b>{n.label}</b>
+                          <div>{n.why}</div>
+                          {n.howToSee && <div className="how">{n.howToSee}</div>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
               {state.health.orphanedChanges > 0 && (
                 <div className="card">
                   <div className="card-title">Edits with nowhere to go</div>
@@ -517,6 +567,7 @@ export function App() {
                 onSelectElement={onSelectElement}
                 selectedElementId={state.selection.elementId}
                 liveEdits={liveEdits}
+                onApplied={onApplied}
                 forceHover={forceHover}
                 matchSelectors={matchSelectors}
                 onRulesMatched={onRulesMatched}

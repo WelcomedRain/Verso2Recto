@@ -243,6 +243,19 @@ button:disabled { cursor: default; opacity: 0.4; }
   background: transparent;
   color: var(--color-neutral-700);
 }
+/* "This is true of the preview, not of your change." Deliberately not the
+   accent treatment used for problems — nothing here is wrong, and colouring it
+   like a fault would teach the wrong reflex about a card that appears often. */
+.card.warn {
+  border-left: 2px solid var(--color-neutral-800);
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-900);
+}
+.unseen { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+.unseen li { border-top: 1px solid var(--color-neutral-400); padding-top: 6px; }
+.unseen b { font-family: var(--font-heading); font-weight: 800; }
+.unseen .how { color: var(--color-neutral-700); margin-top: 2px; }
+
 .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 800; font-family: var(--font-heading); }
 .card-body { font-size: 12px; line-height: 1.45; }
 .card .btn { font-size: 12px; padding: 5px 9px; }

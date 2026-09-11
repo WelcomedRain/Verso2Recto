@@ -12,6 +12,7 @@
 
 import { parseBundle, serializeBundle } from '../core/bundle';
 import { tagForPreview, type TemplateIndex } from '../core/htmlIndex';
+import type { TargetKind } from '../core/targets';
 
 export interface SelectMessage {
   type: 'recto:select';
@@ -21,7 +22,44 @@ export interface SelectMessage {
   runOrdinal: number;
 }
 
-export type PreviewMessage = SelectMessage | { type: 'recto:ready' };
+/**
+ * What the page says after being asked to apply a change.
+ *
+ * The editor cannot work this out for itself — whether an element is drawn at
+ * the current width, whether a selector matches anything, whether a media
+ * condition holds — so the page reports rather than the editor guessing.
+ */
+export interface AppliedMessage {
+  type: 'recto:applied';
+  id: string;
+  result: 'shown' | 'hidden' | 'missing' | 'state';
+  why: string;
+}
+
+export type PreviewMessage = SelectMessage | AppliedMessage | { type: 'recto:ready' };
+
+/**
+ * One queued change, in the shape the bridge wants.
+ *
+ * `id` is the change's own id and comes back on the acknowledgement, which is
+ * what lets the editor say which change is not being shown rather than just
+ * that one is not.
+ */
+export interface LiveEdit {
+  id: string;
+  kind: TargetKind;
+  elementId: string;
+  runOrdinal: number;
+  attrName?: string;
+  prop?: string;
+  value: string;
+  /** For a stylesheet rule: how to write it into the override sheet. */
+  selector?: string;
+  matchSelector?: string;
+  conditions?: string[];
+  /** `hover`, `focus-visible` — the state the rule describes, if any. */
+  ruleState?: string | null;
+}
 
 /**
  * Runs inside the iframe. Kept as a string because it must be injected into a
@@ -35,6 +73,78 @@ const BRIDGE = String.raw`
 <script>
 (function () {
   var selected = null, hovered = null;
+
+  /**
+   * Is this node actually drawn right now?
+   *
+   * The distinction the editor cannot make on its own. An element inside a
+   * menu that is display:none at this width, or a tag in <head>, takes the
+   * change perfectly well and shows nothing for it.
+   */
+  function renders(el) {
+    if (!el || !document.body.contains(el)) return false;
+    return el.getClientRects().length > 0;
+  }
+
+  /**
+   * The override sheet used to preview stylesheet-rule edits.
+   *
+   * Kept as text keyed by change id and rewritten whole. Editing a live
+   * CSSOM rule in place would be less code and would strand a removed edit —
+   * undoing a change sends nothing on its own, and the page would keep showing
+   * a rule the working copy no longer contains.
+   */
+  var rules = {};
+  function writeRule(id, text) {
+    if (text === null) delete rules[id];
+    else rules[id] = text;
+    var sheet = document.getElementById('__recto_rules');
+    if (!sheet) {
+      sheet = document.createElement('style');
+      sheet.id = '__recto_rules';
+      // Last in the document, so it wins a tie on specificity exactly as the
+      // published page would.
+      document.body.appendChild(sheet);
+    }
+    var texts = [];
+    for (var k in rules) texts.push(rules[k]);
+    sheet.textContent = texts.join('\n');
+  }
+
+  function ack(m, result, why) {
+    if (!m || !m.id) return;
+    parent.postMessage({ type: 'recto:applied', id: m.id, result: result, why: why || '' }, '*');
+  }
+
+  var INFO_TAGS = { META: 1, TITLE: 1, LINK: 1, SCRIPT: 1, STYLE: 1, BASE: 1 };
+
+  /**
+   * Report on a node we just changed, in the page's own terms.
+   *
+   * Decided by tag name before position, because position is not stable: this
+   * export keeps its share tags in a <helmet> element in the body and the
+   * runtime hoists them into <head> a moment after first render. Asking where
+   * the node sits gave the right answer only if you asked late enough.
+   *
+   * The settle retry is that same race, generally. An element can be invisible
+   * simply because the runtime has not finished with the page, so a verdict of
+   * "cannot be seen" is checked once more before it is left standing.
+   */
+  function ackNode(m, el, settle) {
+    if (INFO_TAGS[el.tagName]) {
+      return ack(m, 'hidden',
+        'This is a page-information tag. It changes link previews and search results, '
+        + 'not anything you can see on the page.');
+    }
+    if (!renders(el)) {
+      ack(m, 'hidden',
+        'The element it belongs to is not drawn at this width — it may only appear on '
+        + 'another device size, or be hidden until something opens it.');
+      if (settle !== false) setTimeout(function () { ackNode(m, el, false); }, 400);
+      return;
+    }
+    return ack(m, 'shown', '');
+  }
 
   function editable(el) {
     while (el && el !== document.body) {
@@ -89,34 +199,138 @@ const BRIDGE = String.raw`
 
     if (m.type === 'recto:set-text') {
       var el = document.querySelector('[data-recto-id="' + m.elementId + '"]');
-      if (!el) return;
-      var n = 0;
+      if (!el) {
+        return ack(m, 'missing',
+          'Nothing in the rendered page carries this text. It may be built by the page '
+          + 'as it loads rather than written in the markup.');
+      }
+      var n = 0, done = false;
       for (var i = 0; i < el.childNodes.length; i++) {
         var c = el.childNodes[i];
         if (c.nodeType === 3 && c.nodeValue.trim()) {
-          if (n === (m.runOrdinal || 0)) { c.nodeValue = m.value; return; }
+          if (n === (m.runOrdinal || 0)) { c.nodeValue = m.value; done = true; break; }
           n++;
         }
       }
       // The run was whitespace-only when the page rendered; fall back to the
       // element's own text so typing still shows something.
-      el.textContent = m.value;
+      if (!done) el.textContent = m.value;
+      return ackNode(m, el);
     }
 
     if (m.type === 'recto:set-attr') {
       var t = document.querySelector('[data-recto-id="' + m.elementId + '"]');
-      if (t) t.setAttribute(m.attrName, m.value);
+      if (!t) return ack(m, 'missing', 'That element is not in the rendered page.');
+      t.setAttribute(m.attrName, m.value);
+      return ackNode(m, t);
     }
 
     if (m.type === 'recto:set-style') {
       var se = document.querySelector('[data-recto-id="' + m.elementId + '"]');
-      if (se) se.style.setProperty(m.prop, m.value);
+      if (!se) return ack(m, 'missing', 'That element is not in the rendered page.');
+      se.style.setProperty(m.prop, m.value);
+      return ackNode(m, se);
     }
 
     if (m.type === 'recto:set-theme') {
       // An inline custom property on <html> outranks the :root rule, so the
       // page updates without touching its stylesheet.
       document.documentElement.style.setProperty(m.prop, m.value);
+      // Whether anything reads it is the useful question, and only the page can
+      // answer it: a token can be declared and never referenced.
+      var used = false;
+      try {
+        var all = document.body.querySelectorAll('*');
+        for (var ui = 0; ui < all.length && !used; ui++) {
+          if (getComputedStyle(all[ui]).getPropertyValue(m.prop).trim()) used = true;
+        }
+      } catch (err) { used = true; }
+      return ack(m, used ? 'shown' : 'hidden',
+        used ? '' : 'Nothing drawn on the page reads ' + m.prop + ' at this width.');
+    }
+
+    if (m.type === 'recto:drop-rule') {
+      writeRule(m.id, null);
+      return;
+    }
+
+    if (m.type === 'recto:set-rule') {
+      // A stylesheet rule cannot be written through an element, so it is
+      // previewed by an override sheet appended last in the document: at equal
+      // specificity the later rule wins, which is the same answer the published
+      // page gives. No !important — an inline style outranks a rule there too,
+      // and the preview should not pretend otherwise.
+      var conds = m.conditions || [];
+      var matchSel = m.matchSelector || m.selector;
+
+      // What the matching elements look like BEFORE the rule is written, so
+      // the answer can be "and it changed nothing" rather than a guess.
+      var targets = [];
+      try { targets = [].slice.call(document.querySelectorAll(matchSel), 0, 50); }
+      catch (err3) { targets = null; }
+      var was = [];
+      if (targets) {
+        for (var bi = 0; bi < targets.length; bi++) {
+          was.push(getComputedStyle(targets[bi]).getPropertyValue(m.prop));
+        }
+      }
+
+      var body = m.selector + '{' + m.prop + ':' + m.value + '}';
+      for (var qi = conds.length - 1; qi >= 0; qi--) body = conds[qi] + '{' + body + '}';
+      writeRule(m.id, body);
+
+      // Now say honestly whether it can be seen. Four separate reasons it might
+      // not be, and each calls for something different.
+      for (var ci = 0; ci < conds.length; ci++) {
+        if (String(conds[ci]).indexOf('@media') !== 0) continue;
+        var q = String(conds[ci]).replace(/^@media\s*/i, '');
+        var holds = true;
+        try { holds = window.matchMedia(q).matches; } catch (err2) { holds = true; }
+        if (!holds) {
+          return ack(m, 'hidden',
+            'This rule only applies at ' + q + ', and the preview is not at that size. '
+            + 'Switch the device or zoom the preview to that width to see it.');
+        }
+      }
+
+      if (targets && targets.length === 0) {
+        return ack(m, 'hidden',
+          'Nothing on the page matches ' + m.selector + ' at this width, so the rule '
+          + 'changes nothing you can see here.');
+      }
+      if (m.state) {
+        return ack(m, 'state',
+          'This rule only applies while the element is :' + m.state + '.');
+      }
+
+      // Matching an element is not the same as changing it. This page sets most
+      // of its styling directly on the elements, and an element's own style
+      // attribute outranks any stylesheet rule — so a rule edit can be correct,
+      // publishable, and completely invisible. Measured rather than reasoned
+      // about: the browser resolves the cascade, we only read the result.
+      if (targets) {
+        var moved = false;
+        for (var ai = 0; ai < targets.length && !moved; ai++) {
+          if (getComputedStyle(targets[ai]).getPropertyValue(m.prop) !== was[ai]) moved = true;
+        }
+        if (!moved) {
+          // Say WHY only when there is evidence for it. An element declaring
+          // the property itself is that evidence; without it the honest answer
+          // is that nothing moved, not a guess at the cause.
+          var overridden = false;
+          for (var oi = 0; oi < targets.length && !overridden; oi++) {
+            if (targets[oi].style.getPropertyValue(m.prop)) overridden = true;
+          }
+          return ack(m, 'hidden', overridden
+            ? 'The rule changed, but nothing on the page moved: the elements matching '
+              + m.selector + ' set ' + m.prop + ' on themselves, and the style on an element '
+              + 'outranks a stylesheet rule. To change how this looks, set '
+              + m.prop + ' on the element instead.'
+            : 'The rule changed, but nothing on the page looks different — the new value '
+              + 'resolves to what was already being drawn.');
+        }
+      }
+      return ack(m, 'shown', '');
     }
 
     // There is deliberately no handler for writing style-hover back. Measured
@@ -129,7 +343,9 @@ const BRIDGE = String.raw`
 
     if (m.type === 'recto:set-style-attr') {
       var sa = document.querySelector('[data-recto-id="' + m.elementId + '"]');
-      if (sa) sa.setAttribute('style', m.value || '');
+      if (!sa) return ack(m, 'missing', 'That element is not in the rendered page.');
+      sa.setAttribute('style', m.value || '');
+      return ackNode(m, sa);
     }
 
     if (m.type === 'recto:measure-fit') {
@@ -177,11 +393,15 @@ const BRIDGE = String.raw`
 
     if (m.type === 'recto:set-html') {
       var ht = document.querySelector('[data-recto-id="' + m.elementId + '"]');
-      if (!ht) return;
+      if (!ht) return ack(m, 'missing', 'That element is not in the rendered page.');
       var tmp = document.createElement('div');
       tmp.innerHTML = m.html;
       var repl = tmp.firstElementChild;
-      if (!repl) return;
+      if (!repl) {
+        return ack(m, 'missing',
+          'The browser could not build an element out of that code, so the page is '
+          + 'still showing the original.');
+      }
       // Re-stamp the id or the element becomes unselectable the moment it is
       // replaced. Its children are new markup and get no ids until reload,
       // which is honest: they are not the nodes the index knows about.
@@ -209,6 +429,7 @@ const BRIDGE = String.raw`
 
       ht.replaceWith(repl);
       if (selected && !selected.isConnected) selected = repl;
+      return ackNode(m, repl);
     }
 
     if (m.type === 'recto:force-hover') {

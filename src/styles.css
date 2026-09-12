@@ -636,3 +636,19 @@ button:disabled { cursor: default; opacity: 0.4; }
   line-height: 1.45;
   color: var(--color-neutral-700);
 }
+
+/* Shown when the page cannot point at the selection — the answer to "which of
+   these two identical sentences am I editing". Quiet, because it is a fact
+   about the thing rather than a problem with it. */
+.not-drawn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  background: var(--color-neutral-200);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.not-drawn b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.not-drawn span { color: var(--color-neutral-800); }

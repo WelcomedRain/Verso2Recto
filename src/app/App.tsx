@@ -68,6 +68,21 @@ export function App() {
     void db.getFile(state.activeFile).then((f) => setFileText(f?.text ?? ''));
   }, [state.activeFile, state.bundle]);
 
+  /**
+   * Whether the page could actually point at the current selection.
+   *
+   * A Share / SEO value has no box on the page, so nothing lights up. That
+   * silence used to be the whole answer, and it is the reason a meta
+   * description got edited in mistake for the heading it happened to quote
+   * word for word. The page now says which it is, and the panel repeats it.
+   */
+  const [selShown, setSelShown] = useState<{ shown: boolean; detail: string }>(
+    { shown: true, detail: '' },
+  );
+  const onSelectionShown = useCallback(
+    (shown: boolean, detail: string) => setSelShown({ shown, detail }), [],
+  );
+
   const selectedEntry = state.selection.targetId
     ? state.index?.stringsById.get(state.selection.targetId) ?? null
     : null;
@@ -620,6 +635,8 @@ export function App() {
                 onSwept={onSwept}
                 originalHtmlFor={originalHtmlFor}
                 originalStyleFor={originalStyleFor}
+          onSelectionShown={onSelectionShown}
+          selectedLabel={selectedEntry?.label ?? selectedElement?.tag ?? ''}
               />
             )}
             {mode !== 'page' && state.bundle && (
@@ -641,6 +658,16 @@ export function App() {
             <button className={tab === 'pictures' ? 'on' : ''} onClick={() => setTab('pictures')}>Images</button>
             <button className={tab === 'selection' ? 'on' : ''} onClick={() => setTab('selection')}>Select</button>
           </div>
+
+          {/* The page could not point at what is selected. Said here, beside
+              the box being typed into, because that is where the belief about
+              what is being edited actually lives. */}
+          {!selShown.shown && selShown.detail && state.selection.targetId && (
+            <div className="not-drawn">
+              <b>Not on the page</b>
+              <span>{selShown.detail}</span>
+            </div>
+          )}
 
           {tab === 'words' && idx && (
             <WordsPanel

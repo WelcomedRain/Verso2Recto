@@ -49,12 +49,17 @@ interface Props {
    * than the editor guessing.
    */
   onApplied: (id: string, ack: PreviewAck) => void;
+  /** Whether the current selection could actually be pointed at in the page. */
+  onSelectionShown: (shown: boolean, detail: string) => void;
+  /** Human name for the selected thing, drawn on the highlight. */
+  selectedLabel?: string;
 }
 
 export function PageView({
   fileText, index, onSelectElement, selectedElementId, liveEdits, forceHover,
   matchSelectors, onRulesMatched, measureFitFor, onFitMeasured, assetRefs,
   sweepFor, onSwept, originalHtmlFor, originalStyleFor, onApplied,
+  onSelectionShown, selectedLabel,
 }: Props) {
   const [device, setDevice] = useState<Device>('desktop');
   const [zoom, setZoom] = useState<number | 'fill'>('fill');
@@ -117,6 +122,10 @@ export function PageView({
       if (m.type === 'recto:ready') setReady(true);
       if (m.type === 'recto:select') onSelectElement(m.elementId, m.runOrdinal);
       if (m.type === 'recto:applied') onApplied(m.id, { result: m.result, why: m.why });
+      if ((m as { type: string }).type === 'recto:selection-shown') {
+        const r = m as unknown as { shown: boolean; detail: string };
+        onSelectionShown(r.shown, r.detail);
+      }
       if ((m as { type: string }).type === 'recto:fit-measured') {
         onFitMeasured(m as unknown as FitMeasurement);
       }
@@ -127,7 +136,7 @@ export function PageView({
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [onSelectElement, onRulesMatched, onFitMeasured, onApplied]);
+  }, [onSelectElement, onRulesMatched, onFitMeasured, onApplied, onSelectionShown]);
 
   useEffect(() => {
     if (!ready || !measureFitFor) return;
@@ -250,9 +259,9 @@ export function PageView({
   useEffect(() => {
     if (!ready || !selectedElementId) return;
     frameRef.current?.contentWindow?.postMessage(
-      { type: 'recto:select-id', elementId: selectedElementId }, '*',
+      { type: 'recto:select-id', elementId: selectedElementId, label: selectedLabel ?? '' }, '*',
     );
-  }, [selectedElementId, ready]);
+  }, [selectedElementId, ready, selectedLabel]);
 
   /**
    * Measure the frame at a range of window widths.

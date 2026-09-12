@@ -43,6 +43,32 @@ describe('the injected bridge', () => {
     }
   });
 
+  it('does not draw selection with a stylesheet the runtime deletes', () => {
+    /**
+     * The selection outline was a CSS rule on [data-recto-selected]. It never
+     * appeared once: the page runtime rebuilds the document when it renders and
+     * does not keep stylesheets it did not write, so the bridge marked the right
+     * element and drew nothing — for every selection since the feature was
+     * written. Measured in the running app: seven style tags, none carrying the
+     * rule. Inline style on an element the bridge owns is what survives.
+     */
+    const js = bridgeJs();
+    expect(js).toMatch(/data-recto-ui/);
+    expect(js).toMatch(/position:fixed/);
+    const styleBlock = source.slice(
+      source.indexOf('__recto_bridge_style'), source.indexOf('<script>'),
+    );
+    expect(styleBlock).not.toMatch(/outline:\s*2px/);
+  });
+
+  it('reports whether the selection could be pointed at', () => {
+    // Nothing lighting up is the answer to "which of these two identical
+    // sentences am I editing" — but only if the absence is stated out loud.
+    const js = bridgeJs();
+    expect(js).toContain('recto:selection-shown');
+    expect(js).toMatch(/page information/i);
+  });
+
   // Against the real export, and skipped when it is not on this machine — the
   // same rule the rest of the suite follows. A synthetic fixture here would
   // hide format drift, which is the whole risk.

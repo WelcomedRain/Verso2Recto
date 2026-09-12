@@ -67,12 +67,93 @@ export interface LiveEdit {
  */
 const BRIDGE = String.raw`
 <style id="__recto_bridge_style">
-  [data-recto-selected] { outline: 2px solid #ec3013 !important; outline-offset: 3px !important; }
-  [data-recto-hover]:not([data-recto-selected]) { outline: 1px dashed rgba(236,48,19,0.55) !important; outline-offset: 2px !important; }
+  /* The selection and hover outlines used to live here as rules on
+     [data-recto-selected]. They never once appeared: the page runtime rebuilds
+     the document when it renders and this stylesheet does not survive it, so
+     the bridge was faithfully marking the right element and drawing nothing.
+     Measured in the running app - seven style tags present, none containing
+     these rules. They are drawn as positioned overlays now, styled inline,
+     because inline style is the one thing the runtime leaves alone. */
 </style>
 <script>
 (function () {
   var selected = null, hovered = null;
+
+  /**
+   * Selection and hover, drawn as overlays.
+   *
+   * Everything here is set as inline style on elements this bridge owns. A
+   * stylesheet would be the obvious way to do it and is the way it was done;
+   * the runtime deletes stylesheets it did not write when it renders, so the
+   * obvious way silently draws nothing.
+   */
+  var boxSel = null, boxHov = null, labelEl = null;
+
+  function makeBox(border, withLabel) {
+    var b = document.createElement('div');
+    b.setAttribute('data-recto-ui', '');
+    b.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483600;'
+      + 'display:none;border:' + border + ';box-sizing:border-box';
+    if (withLabel) {
+      labelEl = document.createElement('span');
+      labelEl.style.cssText = 'position:absolute;left:-2px;top:-19px;'
+        + 'background:#ec3013;color:#fff;padding:1px 6px;white-space:nowrap;'
+        + 'font:600 11px/1.45 ui-sans-serif,system-ui,-apple-system,sans-serif;'
+        + 'letter-spacing:0.04em';
+      b.appendChild(labelEl);
+    }
+    document.documentElement.appendChild(b);
+    return b;
+  }
+
+  function place(box, el) {
+    if (!box) return false;
+    if (!el || !el.isConnected) { box.style.display = 'none'; return false; }
+    var r = el.getBoundingClientRect();
+    // A head element, or anything display:none, has no box to point at. That
+    // is not a failure to report as an error — it is the answer to "where is
+    // this on the page", and the answer is nowhere.
+    if (!r.width && !r.height) { box.style.display = 'none'; return false; }
+    box.style.display = 'block';
+    box.style.left = r.left + 'px';
+    box.style.top = r.top + 'px';
+    box.style.width = r.width + 'px';
+    box.style.height = r.height + 'px';
+    return true;
+  }
+
+  function redraw() {
+    place(boxSel, selected);
+    place(boxHov, hovered === selected ? null : hovered);
+  }
+
+  /** Say whether the selected thing can be seen, and if not, why not. */
+  function reportSelection(el, shown) {
+    var why = '';
+    if (!shown) {
+      var inHead = el && (el.closest ? !!el.closest('head') : false);
+      var tag = el ? el.tagName.toLowerCase() : '';
+      why = !el
+        ? 'That element is not in the rendered page.'
+        : (inHead || tag === 'meta' || tag === 'link' || tag === 'title')
+          ? 'This is page information. It is not drawn on the page, so there is nothing to point at.'
+          : 'This element is not being drawn at this width, so there is nothing to point at.';
+    }
+    parent.postMessage({ type: 'recto:selection-shown', shown: !!shown, detail: why }, '*');
+  }
+
+  function select(el, label) {
+    selected = el;
+    if (!boxSel) boxSel = makeBox('2px solid #ec3013', true);
+    if (labelEl) labelEl.textContent = label || '';
+    if (labelEl) labelEl.style.display = label ? 'block' : 'none';
+    var shown = place(boxSel, el);
+    reportSelection(el, shown);
+    return shown;
+  }
+
+  addEventListener('scroll', redraw, true);
+  addEventListener('resize', redraw);
 
   /**
    * Is this node actually drawn right now?
@@ -173,6 +254,8 @@ const BRIDGE = String.raw`
     if (hovered) hovered.removeAttribute('data-recto-hover');
     hovered = el;
     if (hovered) hovered.setAttribute('data-recto-hover', '');
+    if (!boxHov) boxHov = makeBox('1px dashed rgba(236,48,19,0.75)', false);
+    place(boxHov, hovered === selected ? null : hovered);
   }, true);
 
   document.addEventListener('click', function (e) {
@@ -182,8 +265,8 @@ const BRIDGE = String.raw`
     e.preventDefault();
     e.stopPropagation();
     if (selected) selected.removeAttribute('data-recto-selected');
-    selected = el;
     el.setAttribute('data-recto-selected', '');
+    select(el, el.tagName.toLowerCase());
     parent.postMessage({
       type: 'recto:select',
       elementId: el.getAttribute('data-recto-id'),
@@ -461,11 +544,11 @@ const BRIDGE = String.raw`
     if (m.type === 'recto:select-id') {
       var s = document.querySelector('[data-recto-id="' + m.elementId + '"]');
       if (selected) selected.removeAttribute('data-recto-selected');
-      selected = s;
-      if (s) {
-        s.setAttribute('data-recto-selected', '');
-        s.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }
+      if (s) s.setAttribute('data-recto-selected', '');
+      var shown = select(s, m.label || '');
+      // Only chase something there is something to chase. Scrolling to a head
+      // element moves the page for no reason and looks like a glitch.
+      if (s && shown) s.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   });
 

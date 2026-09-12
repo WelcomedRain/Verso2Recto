@@ -92,9 +92,22 @@ export interface StringEntry {
    * overwrites it on render — so the UI shows it read-only and says why.
    */
   computed: boolean;
+  /**
+   * True when this string is page *information* rather than page content —
+   * it lives in the head and is never drawn. Search results and link previews
+   * read it; a visitor looking at the page never sees it.
+   *
+   * Decided by the owning element, not by a label, because the labels are
+   * written for people and `<link href>` reads as "Description" in the UI
+   * while being pure head furniture.
+   */
+  pageInfo: boolean;
 }
 
 const PLACEHOLDER = /\{\{[^}]*\}\}/;
+
+/** Elements whose strings never appear on the page. */
+const HEAD_ONLY = new Set(['meta', 'link', 'title', 'base']);
 
 export interface TemplateIndex {
   elements: ElementNode[];
@@ -107,6 +120,22 @@ const NAME_START = /[A-Za-z]/;
 const ATTR_NAME_END = /[\s/>=]/;
 
 /** Attributes whose value is user-facing copy worth indexing. */
+/**
+ * What to call this value in the panel.
+ *
+ * Everything that was not a meta tag used to be called "Description", so a
+ * link's web address appeared under the same heading as the text describing a
+ * photograph. The name a person reads has to say which of those they are
+ * looking at, or they edit the wrong one.
+ */
+function attrLabel(tag: string, name: string): string {
+  if (tag === 'meta') return 'Share / SEO';
+  if (name === 'alt') return 'Description';
+  if (name === 'title') return 'Tooltip';
+  if (name === 'href') return 'Link address';
+  return 'Description';
+}
+
 function copyAttrLabel(tag: string, attrs: AttrNode[], name: string): string | null {
   if (tag === 'meta') {
     const key = attrs.find((a) => a.name === 'property' || a.name === 'name');
@@ -377,6 +406,7 @@ export function indexTemplate(src: string): TemplateIndex {
       raw: text,
       value: decodeEntities(text),
       computed: PLACEHOLDER.test(text),
+      pageInfo: HEAD_ONLY.has(owner ? owner.tag : ''),
     });
   }
 
@@ -391,13 +421,14 @@ export function indexTemplate(src: string): TemplateIndex {
         kind: 'attr',
         elementId: el.id,
         tag: label,
-        label: el.tag === 'meta' ? 'Share / SEO' : 'Description',
+        label: attrLabel(el.tag, attr.name),
         attrName: attr.name,
         start: attr.valueStart,
         end: attr.valueEnd,
         raw: attr.value,
         value: decodeEntities(attr.value),
         computed: PLACEHOLDER.test(attr.value),
+        pageInfo: HEAD_ONLY.has(el.tag),
       });
     }
   }

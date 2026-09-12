@@ -107,6 +107,13 @@ button:disabled { cursor: default; opacity: 0.4; }
 .input.edited { background: var(--color-accent-100); }
 .input:disabled { background: var(--color-neutral-200); color: var(--color-neutral-700); }
 
+/* A textarea inside .panel is a column flex item, and flex items are allowed to
+   shrink below their content size. That overruled `rows`, squashing the value
+   box in the Select tab to a single clipped line — and undid any drag of the
+   resize handle on the next layout, so the box read as locked. It was not
+   disabled; it was being compressed. */
+.panel .input { flex: none; }
+
 /* ---- shell ---- */
 
 .shell {
@@ -619,3 +626,13 @@ button:disabled { cursor: default; opacity: 0.4; }
 .dest-name em { font-style: normal; font-weight: 400; color: var(--color-neutral-700); }
 .dest-url { font-family: var(--font-mono); font-size: 11px; color: var(--color-neutral-700); }
 .dest-why { font-size: 12px; line-height: 1.4; color: var(--color-neutral-800); }
+
+/* A break in a long list where the kind of thing changes, so the reader is told
+   they have crossed from what the page shows to what it merely carries. */
+.group-head { border-top: 2px solid var(--color-divider); padding-top: 12px; margin-top: 4px; }
+.group-head p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-neutral-700);
+}

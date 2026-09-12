@@ -23,32 +23,57 @@ export function WordsPanel({
   changes: Map<string, PendingChange>;
   selectedId: string | null;
 }) {
+  // Page furniture and page content are different jobs, and this list used to
+  // run them together in document order — which put fourteen invisible
+  // Share / SEO boxes above the first word anybody can actually see. Someone
+  // looking for the main heading scrolled to the top, opened the first box
+  // that would open, and edited the meta description instead. The two are
+  // separated now, and the words you can see come first.
+  const seo = index.strings.filter((s) => s.pageInfo);
+  const words = index.strings.filter((s) => !s.pageInfo);
+
+  const field = (s: StringEntry) => (
+    <div className="field" key={s.id}>
+      <div className="field-head">
+        <span className="label">{s.label}</span>
+        <span className="tag">{s.tag}</span>
+      </div>
+      <textarea
+        className={`input ${changes.has(s.id) ? 'edited' : ''}`}
+        rows={2}
+        value={valueOf(s)}
+        disabled={s.computed}
+        title={s.computed ? 'The page fills this in when it loads, so there is nothing here to change.' : undefined}
+        onFocus={() => onFocus(s)}
+        onChange={(e) => onEdit(s.id, e.target.value)}
+        style={selectedId === s.id ? { borderColor: 'var(--color-accent)' } : undefined}
+      />
+      {s.computed && (
+        <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+          The page fills this in when it loads — editing it here would not stick.
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="panel">
-      <div className="label">Every word on this page — {index.strings.length} in all</div>
-      {index.strings.map((s) => (
-        <div className="field" key={s.id}>
-          <div className="field-head">
-            <span className="label">{s.label}</span>
-            <span className="tag">{s.tag}</span>
+      <div className="label">Words on the page — {words.length}</div>
+      {words.map(field)}
+
+      {seo.length > 0 && (
+        <>
+          <div className="group-head">
+            <div className="label">Page information — {seo.length}</div>
+            <p>
+              None of these appear on the page. They are what Google shows in
+              search results and what a link preview shows when someone shares
+              the address.
+            </p>
           </div>
-          <textarea
-            className={`input ${changes.has(s.id) ? 'edited' : ''}`}
-            rows={2}
-            value={valueOf(s)}
-            disabled={s.computed}
-            title={s.computed ? 'The page fills this in when it loads, so there is nothing here to change.' : undefined}
-            onFocus={() => onFocus(s)}
-            onChange={(e) => onEdit(s.id, e.target.value)}
-            style={selectedId === s.id ? { borderColor: 'var(--color-accent)' } : undefined}
-          />
-          {s.computed && (
-            <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-              The page fills this in when it loads — editing it here would not stick.
-            </div>
-          )}
-        </div>
-      ))}
+          {seo.map(field)}
+        </>
+      )}
     </div>
   );
 }

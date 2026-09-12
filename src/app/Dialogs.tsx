@@ -265,10 +265,13 @@ export function PublishDialog({
             </p>
           </div>
 
+          {/* Said before the button is pressed, so it has to be the truth about
+              what the button will do — this is where the expectation is set. */}
           {!online && (
             <div className="banner-err">
-              You are offline. RectoVeritas will do everything it can now and send it to GitHub by
-              itself as soon as you are back online.
+              You are offline, so nothing can be sent. RectoVeritas will still write and
+              check the whole page, which tells you it would publish cleanly — then your
+              changes stay here, waiting, until you publish again with a connection.
             </div>
           )}
 
@@ -294,7 +297,7 @@ export function PublishDialog({
 
       {phase !== 'review' && (
         <div className="stack">
-          <h2>{phase === 'running' ? 'Publishing' : outcome === 'failed' ? 'Nothing was published' : outcome === 'queued' ? 'Saved and queued' : 'Published'}</h2>
+          <h2>{phase === 'running' ? 'Publishing' : outcome === 'failed' ? 'Nothing was published' : outcome === 'queued' ? 'Checked — not sent' : 'Published'}</h2>
 
           <div>
             {steps.map((s) => (
@@ -334,7 +337,11 @@ export function PublishDialog({
             </div>
           )}
           {phase === 'done' && outcome === 'queued' && (
-            <p>Everything is written and checked. It will publish itself when you are back online.</p>
+            <p>
+              Everything is written and checked, so it would publish cleanly — but
+              nothing has been sent, because there is no connection. Your changes are
+              still waiting. Press Publish again once you are back online.
+            </p>
           )}
 
           {phase === 'done' && (

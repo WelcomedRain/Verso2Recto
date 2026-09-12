@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
-import { verifyHeadTags, editsFor, type PendingChange } from './publish';
+import { verifyHeadTags, editsFor, publish, type PendingChange } from './publish';
 import { parseBundle } from './bundle';
 import { indexTemplate } from './htmlIndex';
 import { buildTargets } from './targets';
@@ -81,5 +81,56 @@ describe('editsFor', () => {
       liveValue: 'a', nextValue: 'b',
     };
     expect(() => editsFor([change], new Map())).toThrow(/position in the page was lost/);
+  });
+});
+
+/**
+ * Publishing with no connection.
+ *
+ * The dialog used to say "It will publish itself when you are back online" and
+ * the step list marked Pushed as done. Neither was true: the `online` listener
+ * only flips a flag, and nothing in the app retries a publish. No work was ever
+ * lost — the queue survives, because the baseline is only reset on a real push
+ * — but being told it was handled is the reason you would not go back and
+ * press the button.
+ */
+describe.skipIf(!hasReal)('publishing while offline', () => {
+  const inputFor = (online: boolean) => {
+    const originalFile = readFileSync(REAL, 'utf8');
+    const bundle = parseBundle(originalFile);
+    return {
+      ref: { owner: 'o', repo: 'r', branch: 'main' },
+      token: 'unused-while-offline',
+      originalFile,
+      path: 'index.html',
+      changes: [] as PendingChange[],
+      targets: buildTargets(bundle.template, indexTemplate(bundle.template)).byId,
+      message: 'test',
+      online,
+    };
+  };
+
+  it('does not mark the push as done when nothing was pushed', async () => {
+    const r = await publish(inputFor(false), () => {});
+    expect(r.outcome).toBe('queued');
+    const pushed = r.steps.find((s) => s.id === 'pushed')!;
+    expect(pushed.state).not.toBe('done');
+    expect(pushed.state).not.toBe('failed');
+  });
+
+  it('does not claim it will send the work later', async () => {
+    const r = await publish(inputFor(false), () => {});
+    const said = r.steps.map((s) => `${s.label} ${s.note}`).join(' ').toLowerCase();
+    expect(said).not.toMatch(/will publish|itself|automatic/);
+  });
+
+  it('still gets far enough to prove the page would publish cleanly', async () => {
+    // The offline attempt is worth making: everything up to the send is real
+    // verification, including the head-tag gate.
+    const r = await publish(inputFor(false), () => {});
+    for (const id of ['written', 'rebuilt', 'spliced', 'verified']) {
+      expect(r.steps.find((s) => s.id === id)!.state, id).toBe('done');
+    }
+    expect(r.fileText, 'the rebuilt page is kept').toBeTruthy();
   });
 });

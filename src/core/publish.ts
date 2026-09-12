@@ -155,6 +155,13 @@ export interface PublishInput {
 }
 
 export interface PublishResult {
+  /**
+   * `queued` means written, rebuilt and verified but NOT sent — there was no
+   * connection. Nothing in the app retries it. The edits stay in the queue and
+   * the user publishes again when they are back online, which the footer's
+   * running count already reminds them to do. Do not reintroduce a promise of
+   * an automatic retry without first building one.
+   */
   outcome: 'pushed' | 'queued' | 'failed';
   steps: Step[];
   commitSha?: string;
@@ -239,7 +246,11 @@ export async function publish(
   // 5 — push
   set('pushed', 'active', '');
   if (!input.online) {
-    set('pushed', 'done', 'queued — will publish itself when you are back online');
+    // Deliberately not 'done'. Nothing was sent, and a filled mark beside
+    // "Pushed" says the opposite of that. The dialog used to promise the app
+    // would send it later; nothing anywhere does, so the promise is gone and
+    // the step reads as what it is — the one thing that did not happen.
+    set('pushed', 'waiting', 'not sent — no connection');
     return { outcome: 'queued', steps, fileText };
   }
   try {

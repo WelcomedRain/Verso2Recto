@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { StoredSource } from '../core/db';
 import type { PendingChange, Step } from '../core/publish';
+import type { Destination, DestinationId } from '../core/destination';
 import type { SyncState } from './store';
 import type { DeployObservation } from '../core/deploy';
 
@@ -242,7 +243,8 @@ export function SyncDialog({
 /* ------------------------------ Publish ------------------------------ */
 
 export function PublishDialog({
-  phase, changes, steps, outcome, error, online, deploy, onPublish, onClose,
+  phase, changes, steps, outcome, error, online, deploy,
+  destinations, dest, onDest, everPublishedLive, onPublish, onClose,
 }: {
   phase: 'review' | 'running' | 'done';
   changes: PendingChange[];
@@ -251,9 +253,14 @@ export function PublishDialog({
   error: string | null;
   online: boolean;
   deploy: DeployObservation | null;
+  destinations: Record<DestinationId, Destination> | null;
+  dest: DestinationId;
+  onDest: (d: DestinationId) => void;
+  everPublishedLive: boolean;
   onPublish: () => void;
   onClose: () => void;
 }) {
+  const target = destinations?.[dest] ?? null;
   return (
     <Backdrop onClose={phase === 'running' ? () => {} : onClose} width={560}>
       {phase === 'review' && (
@@ -261,9 +268,43 @@ export function PublishDialog({
           <div>
             <h2>Publish your changes</h2>
             <p style={{ marginTop: 6 }}>
-              {changes.length} change{changes.length === 1 ? '' : 's'} will go to the live site.
+              {changes.length} change{changes.length === 1 ? '' : 's'}
+              {target ? <> will go to <b>{target.url}</b></> : ' will be published'}.
             </p>
           </div>
+
+          {/* Chosen here, at the moment of publishing, because this is the only
+              screen where the difference between the two has consequences. */}
+          {destinations && (
+            <div className="dest">
+              {(['preview', 'live'] as DestinationId[]).map((id) => (
+                <button
+                  key={id}
+                  className={`dest-opt ${dest === id ? 'on' : ''}`}
+                  onClick={() => onDest(id)}
+                >
+                  <span className="dest-name">
+                    {destinations[id].label}
+                    {id === 'preview' && !everPublishedLive && <em> · suggested</em>}
+                  </span>
+                  <span className="dest-url">{destinations[id].url}</span>
+                  <span className="dest-why">
+                    {id === 'preview'
+                      ? 'A copy nobody is linked to, hidden from search. Your changes stay queued afterwards, so you can look and then publish for real.'
+                      : 'The real site, visible to everyone. Publishing here clears your queue.'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!everPublishedLive && dest === 'live' && (
+            <div className="banner-err">
+              Nothing has ever been published from this editor, so the publish path
+              itself is untested. If something is wrong with it, the homepage is a
+              costly place to find out. Preview first is the cheaper order.
+            </div>
+          )}
 
           {/* Said before the button is pressed, so it has to be the truth about
               what the button will do — this is where the expectation is set. */}
@@ -326,9 +367,10 @@ export function PublishDialog({
               <div className={`step ${deploy?.state === 'verified' ? 'done' : 'active'}`}>
                 <span className="mark" />
                 <span className="txt">
-                  {deploy?.state === 'verified' ? 'The live site is serving your change'
-                    : deploy?.state === 'unknown' ? 'Could not check the live site'
-                    : 'Checking the live site…'}
+                  {deploy?.state === 'verified'
+                    ? `${target && !target.isLive ? 'The preview' : 'The live site'} is serving your change`
+                    : deploy?.state === 'unknown' ? 'Could not check the page'
+                    : 'Checking the page…'}
                 </span>
               </div>
               <p style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>

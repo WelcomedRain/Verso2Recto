@@ -25,17 +25,27 @@ export interface StatusLine {
   connection: { text: string; tone: ConnectionTone } | null;
 }
 
-/** The host a publish would land on, for saying so out loud. */
-export function publishTarget(liveUrl: string | null | undefined): string | null {
-  if (!liveUrl) return null;
-  try { return new URL(liveUrl).host; } catch { return null; }
+/**
+ * Where a publish would land, short enough to sit in a status bar.
+ *
+ * The host alone stopped being enough once a staged copy existed: preview and
+ * live share a domain and differ only by path, so a bare host would name both
+ * and distinguish neither.
+ */
+export function publishTarget(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.pathname === '/' ? u.host : `${u.host}${u.pathname}`;
+  } catch { return null; }
 }
 
 export function statusLine(o: {
   dirty: number;
   networkUp: boolean;
   manualOffline: boolean;
-  liveUrl?: string | null;
+  /** The URL the next publish would write to — not necessarily the live one. */
+  publishTo?: string | null;
   deploy: DeployObservation | null;
   lastPush: number | null;
 }): StatusLine {
@@ -44,7 +54,7 @@ export function statusLine(o: {
   // opposite the rest of the time.
   const mode = 'Editing a copy on this computer';
 
-  const host = publishTarget(o.liveUrl);
+  const host = publishTarget(o.publishTo);
   const one = o.dirty === 1;
   const changes = `${o.dirty} change${one ? '' : 's'} waiting`;
   const pending = o.dirty > 0

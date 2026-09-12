@@ -11,6 +11,7 @@ import { parseBundle, serializeBundle, verifyRoundTrip } from './bundle';
 import { applyEdits, encodeAttr, type Edit } from './htmlIndex';
 import { encodeFor, type EditTarget } from './targets';
 import { GitHub, type RepoRef } from './github';
+import { withNoindex, type Destination } from './destination';
 
 export type StepId = 'written' | 'rebuilt' | 'spliced' | 'verified' | 'pushed';
 export type StepState = 'waiting' | 'active' | 'done' | 'failed';
@@ -147,7 +148,8 @@ export interface PublishInput {
   token: string;
   /** The unmodified index.html as fetched from GitHub. */
   originalFile: string;
-  path: string;
+  /** Which file in the repository this publish writes, and what that means. */
+  destination: Destination;
   changes: PendingChange[];
   targets: Map<string, EditTarget>;
   message: string;
@@ -164,6 +166,11 @@ export interface PublishResult {
    */
   outcome: 'pushed' | 'queued' | 'failed';
   steps: Step[];
+  /**
+   * Echoed back so the caller cannot reset the baseline against a publish that
+   * never touched the live page. Read `destination.isLive`, never the phase.
+   */
+  destination: Destination;
   commitSha?: string;
   /** The rebuilt file, kept so an offline publish can be replayed later. */
   fileText?: string;
@@ -189,7 +196,7 @@ export async function publish(
   };
   const fail = (id: StepId, note: string): PublishResult => {
     set(id, 'failed', note);
-    return { outcome: 'failed', steps, error: note };
+    return { outcome: 'failed', steps, destination: input.destination, error: note };
   };
 
   // 1 — write
@@ -217,7 +224,10 @@ export async function publish(
 
   // 2 — rebuild
   set('rebuilt', 'active', '');
-  const fileText = serializeBundle(bundle, { template: nextTemplate });
+  let fileText = serializeBundle(bundle, { template: nextTemplate });
+  // Before the readback, so the readback covers the injection too, and before
+  // the gate, so the gate judges the exact bytes that will be committed.
+  if (input.destination.noindex) fileText = withNoindex(fileText);
   try {
     const check = parseBundle(fileText);
     if (check.template !== nextTemplate) {
@@ -226,7 +236,9 @@ export async function publish(
   } catch (e) {
     return fail('rebuilt', `The rebuilt page is not readable: ${(e as Error).message}`);
   }
-  set('rebuilt', 'done', `${Math.round(fileText.length / 1024)} KB`);
+  set('rebuilt', 'done', input.destination.noindex
+    ? `${Math.round(fileText.length / 1024)} KB · marked noindex`
+    : `${Math.round(fileText.length / 1024)} KB`);
 
   // 3 — splice. The block already sits in <head> in the current export, so this
   // step is a no-op unless an export moved it. Re-splicing is left to the health
@@ -251,17 +263,17 @@ export async function publish(
     // would send it later; nothing anywhere does, so the promise is gone and
     // the step reads as what it is — the one thing that did not happen.
     set('pushed', 'waiting', 'not sent — no connection');
-    return { outcome: 'queued', steps, fileText };
+    return { outcome: 'queued', steps, destination: input.destination, fileText };
   }
   try {
     const gh = new GitHub(input.token);
     const { commitSha } = await gh.commitFiles(
       input.ref,
-      [{ path: input.path, content: fileText, encoding: 'utf-8' }],
+      [{ path: input.destination.path, content: fileText, encoding: 'utf-8' }],
       input.message,
     );
-    set('pushed', 'done', commitSha.slice(0, 7));
-    return { outcome: 'pushed', steps, commitSha, fileText };
+    set('pushed', 'done', `${commitSha.slice(0, 7)} → ${input.destination.path}`);
+    return { outcome: 'pushed', steps, destination: input.destination, commitSha, fileText };
   } catch (e) {
     return fail('pushed', (e as Error).message);
   }

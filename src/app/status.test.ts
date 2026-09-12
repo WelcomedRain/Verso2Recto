@@ -3,7 +3,7 @@ import { statusLine, publishTarget } from './status';
 
 const base = {
   dirty: 0, networkUp: true, manualOffline: false,
-  liveUrl: 'https://antheasolve.com/', deploy: null, lastPush: null,
+  publishTo: 'https://antheasolve.com/', deploy: null, lastPush: null,
 };
 
 describe('the status line', () => {
@@ -36,7 +36,7 @@ describe('the status line', () => {
   });
 
   it('still reports the count when the destination is not known yet', () => {
-    const s = statusLine({ ...base, dirty: 2, liveUrl: null });
+    const s = statusLine({ ...base, dirty: 2, publishTo: null });
     expect(s.pending).toContain('2 changes waiting');
     expect(s.pending).not.toContain('undefined');
   });
@@ -68,10 +68,17 @@ describe('the status line', () => {
 });
 
 describe('publishTarget', () => {
-  it('reduces the live URL to something a person would say out loud', () => {
+  it('reduces a URL to something a person would say out loud', () => {
     expect(publishTarget('https://antheasolve.com/')).toBe('antheasolve.com');
+  });
+
+  it('keeps the path, because preview and live share a host', () => {
+    // A bare host would name both destinations and distinguish neither, which
+    // is the one thing this string exists to do.
+    expect(publishTarget('https://antheasolve.com/preview/'))
+      .toBe('antheasolve.com/preview/');
     expect(publishTarget('https://welcomedrain.github.io/Anthea-Solve/'))
-      .toBe('welcomedrain.github.io');
+      .toBe('welcomedrain.github.io/Anthea-Solve/');
   });
 
   it('survives a missing or malformed URL', () => {

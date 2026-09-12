@@ -14,6 +14,7 @@ import { outerRange, type StringEntry } from '../core/htmlIndex';
 import type { LiveEdit } from './preview';
 import { noteFor, summarise, type PreviewAck } from './previewable';
 import { statusLine } from './status';
+import { destinationsFor, type DestinationId } from '../core/destination';
 import { reportFit, makeItCover, makeItFitByHeight, type FitMeasurement, type SweepPoint } from '../core/fit';
 
 type Mode = 'page' | 'split' | 'code';
@@ -57,7 +58,9 @@ export function App() {
   const [pub, setPub] = useState<{
     open: boolean; phase: 'review' | 'running' | 'done';
     steps: Step[]; outcome: PublishResult['outcome'] | null; error: string | null;
-  }>({ open: false, phase: 'review', steps: [], outcome: null, error: null });
+    /** Which destination this publish is aimed at. Chosen before it runs. */
+    dest: DestinationId;
+  }>({ open: false, phase: 'review', steps: [], outcome: null, error: null, dest: 'preview' });
 
   const [fileText, setFileText] = useState('');
   useEffect(() => {
@@ -362,33 +365,42 @@ export function App() {
   }, [ed, state.targets]);
 
   const doPublish = async () => {
-    if (!state.source || !state.targets || !fileText) return;
+    if (!state.source || !state.targets || !fileText || !destinations) return;
+    const destination = destinations[pub.dest];
     setPub((p) => ({ ...p, phase: 'running', steps: [], outcome: null, error: null }));
+    const n = ed.changeList.length;
     const result = await publish(
       {
         ref: state.source,
         token: state.token ?? '',
         originalFile: fileText,
-        path: state.source.path,
+        destination,
         changes: ed.changeList,
         targets: state.targets!.byId,
-        message: `Update site copy (${ed.changeList.length} change${ed.changeList.length === 1 ? '' : 's'})`,
+        message: destination.isLive
+          ? `Update site copy (${n} change${n === 1 ? '' : 's'})`
+          : `Stage ${n} change${n === 1 ? '' : 's'} for review`,
         online,
       },
       (steps) => setPub((p) => ({ ...p, steps })),
     );
     setPub((p) => ({ ...p, phase: 'done', outcome: result.outcome, error: result.error ?? null, steps: result.steps }));
+
     if (result.outcome === 'pushed' && result.fileText) {
-      await ed.commitPublished(result.commitSha ?? null, result.fileText);
+      // THE RULE. A preview publish does not touch the live page, so the edits
+      // are still outstanding and the queue must survive untouched. Clearing it
+      // here would report the work as shipped while the site was unchanged —
+      // read the destination, never the outcome.
+      if (result.destination.isLive) {
+        await ed.commitPublished(result.commitSha ?? null, result.fileText);
+      }
       // Observe the deployment rather than assume it. GitHub Pages builds
       // asynchronously and can fail after a good push.
-      if (state.source?.liveUrl) {
-        void verifyDeployment({
-          liveUrl: state.source.liveUrl,
-          expected: result.fileText,
-          onProgress: ed.setDeploy,
-        }).then(ed.setDeploy);
-      }
+      void verifyDeployment({
+        liveUrl: result.destination.url,
+        expected: result.fileText,
+        onProgress: ed.setDeploy,
+      }).then(ed.setDeploy);
     }
   };
 
@@ -407,11 +419,28 @@ export function App() {
   }
 
   const dirty = ed.changeList.length;
+
+  const destinations = state.source
+    ? destinationsFor(state.source.path, state.source.liveUrl)
+    : null;
+
+  /**
+   * Preview until the real thing has worked once.
+   *
+   * `lastPush` is only written when a publish reaches the live page, so its
+   * absence means no publish has ever succeeded against this site. The first
+   * one should not be aimed at the homepage: if anything in the pipeline is
+   * wrong, the staged copy is where you want to find out.
+   */
+  const defaultDest: DestinationId = state.lastPush ? 'live' : 'preview';
+
   const status = statusLine({
     dirty,
     networkUp: state.online,
     manualOffline: ed.manualOffline,
-    liveUrl: state.source?.liveUrl,
+    // While the dialog is open it is the authority on where this publish is
+    // going; the footer must not sit underneath it saying something else.
+    publishTo: destinations?.[pub.open ? pub.dest : defaultDest].url,
     deploy: state.deploy,
     lastPush: state.lastPush,
   });
@@ -460,7 +489,10 @@ export function App() {
         <button
           className="btn btn-primary"
           disabled={dirty === 0}
-          onClick={() => setPub({ open: true, phase: 'review', steps: [], outcome: null, error: null })}
+          onClick={() => setPub({
+            open: true, phase: 'review', steps: [], outcome: null, error: null,
+            dest: defaultDest,
+          })}
         >
           Publish changes
           {dirty > 0 && <span className="badge">{dirty}</span>}
@@ -766,8 +798,15 @@ export function App() {
           error={pub.error}
           online={online}
           deploy={state.deploy}
+          destinations={destinations}
+          dest={pub.dest}
+          onDest={(d) => setPub((p) => ({ ...p, dest: d }))}
+          everPublishedLive={state.lastPush !== null}
           onPublish={doPublish}
-          onClose={() => setPub({ open: false, phase: 'review', steps: [], outcome: null, error: null })}
+          onClose={() => setPub({
+            open: false, phase: 'review', steps: [], outcome: null, error: null,
+            dest: defaultDest,
+          })}
         />
       )}
 

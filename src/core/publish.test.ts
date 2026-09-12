@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { verifyHeadTags, editsFor, publish, type PendingChange } from './publish';
 import { parseBundle } from './bundle';
+import { destinationsFor } from './destination';
 import { indexTemplate } from './htmlIndex';
 import { buildTargets } from './targets';
 
@@ -102,7 +103,7 @@ describe.skipIf(!hasReal)('publishing while offline', () => {
       ref: { owner: 'o', repo: 'r', branch: 'main' },
       token: 'unused-while-offline',
       originalFile,
-      path: 'index.html',
+      destination: destinationsFor('index.html', 'https://example.test/').live,
       changes: [] as PendingChange[],
       targets: buildTargets(bundle.template, indexTemplate(bundle.template)).byId,
       message: 'test',
@@ -132,5 +133,58 @@ describe.skipIf(!hasReal)('publishing while offline', () => {
       expect(r.steps.find((s) => s.id === id)!.state, id).toBe('done');
     }
     expect(r.fileText, 'the rebuilt page is kept').toBeTruthy();
+  });
+});
+
+/**
+ * Publishing to the staged copy.
+ *
+ * The caller decides whether to clear the queue by reading
+ * `result.destination.isLive`, so the pipeline must hand back the destination
+ * it was actually given. If that echo were ever wrong — or dropped, and the
+ * caller fell back to the outcome — a preview publish would clear the queue and
+ * report work as shipped while the live page sat unchanged.
+ */
+describe.skipIf(!hasReal)('publishing to preview', () => {
+  const dests = destinationsFor('index.html', 'https://antheasolve.com/');
+  const inputTo = (id: 'preview' | 'live') => {
+    const originalFile = readFileSync(REAL, 'utf8');
+    const bundle = parseBundle(originalFile);
+    return {
+      ref: { owner: 'o', repo: 'r', branch: 'main' },
+      token: 'unused-while-offline',
+      originalFile,
+      destination: dests[id],
+      changes: [] as PendingChange[],
+      targets: buildTargets(bundle.template, indexTemplate(bundle.template)).byId,
+      message: 'test',
+      online: false,
+    };
+  };
+
+  it('hands back the destination it was given', async () => {
+    expect((await publish(inputTo('preview'), () => {})).destination.isLive).toBe(false);
+    expect((await publish(inputTo('live'), () => {})).destination.isLive).toBe(true);
+  });
+
+  it('marks the staged copy noindex and leaves the live one indexable', async () => {
+    const staged = await publish(inputTo('preview'), () => {});
+    const live = await publish(inputTo('live'), () => {});
+    expect(staged.fileText).toContain('name="robots"');
+    expect(live.fileText).not.toContain('name="robots"');
+  });
+
+  it('puts the staged copy through the same gate as the live one', async () => {
+    // The robots tag is injected into <head>, which is the region the gate
+    // inspects — so the staged file has to clear the bar, not skip it.
+    const staged = await publish(inputTo('preview'), () => {});
+    expect(staged.steps.find((s) => s.id === 'verified')!.state).toBe('done');
+    expect(verifyHeadTags(staged.fileText!).ok).toBe(true);
+  });
+
+  it('changes nothing but the robots tag between the two', async () => {
+    const staged = (await publish(inputTo('preview'), () => {})).fileText!;
+    const live = (await publish(inputTo('live'), () => {})).fileText!;
+    expect(staged.replace(/\n  <meta name="robots"[^>]*>/, '')).toBe(live);
   });
 });

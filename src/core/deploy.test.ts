@@ -115,3 +115,50 @@ describe('liveUrlFor', () => {
       .toBe('https://example.com/site/');
   });
 });
+
+/**
+ * The first real publish went to the staged copy, and the dialog reported "The
+ * live site is serving your change." The live page had never been touched. The
+ * strings were hardcoded to the only destination that existed when they were
+ * written, which made them a false statement about the one page this editor
+ * exists to protect the moment a second destination appeared.
+ */
+describe('what the observation says it checked', () => {
+  const res = (body: string) => ({ ok: true, status: 200, text: async () => body }) as Response;
+  const noSleep = async () => {};
+
+  it('never mentions the live site when it checked the preview', async () => {
+    const o = await verifyDeployment({
+      liveUrl: 'https://x.test/preview/', expected: 'P', subject: 'the preview',
+      fetchImpl: vi.fn().mockResolvedValue(res('P')), sleepImpl: noSleep,
+    });
+    expect(o.state).toBe('verified');
+    expect(o.detail).toBe('The preview is serving your change.');
+    expect(o.detail).not.toMatch(/live/i);
+  });
+
+  it('says so in every outcome, not only the happy one', async () => {
+    const bad = { ok: false, status: 404, text: async () => '' } as Response;
+    const o = await verifyDeployment({
+      liveUrl: 'https://x.test/preview/', expected: 'P', subject: 'the preview',
+      fetchImpl: vi.fn().mockResolvedValue(bad), sleepImpl: noSleep,
+      timeoutMs: 30, intervalMs: 1,
+    });
+    expect(o.detail).not.toMatch(/live/i);
+
+    const unreachable = await verifyDeployment({
+      liveUrl: 'https://x.test/preview/', expected: 'P', subject: 'the preview',
+      fetchImpl: vi.fn().mockRejectedValue(new Error('offline')), sleepImpl: noSleep,
+      timeoutMs: 30, intervalMs: 1,
+    });
+    expect(unreachable.detail).not.toMatch(/live/i);
+  });
+
+  it('still speaks of the live site by default', async () => {
+    const o = await verifyDeployment({
+      liveUrl: 'https://x.test/', expected: 'P',
+      fetchImpl: vi.fn().mockResolvedValue(res('P')), sleepImpl: noSleep,
+    });
+    expect(o.detail).toBe('The live site is serving your change.');
+  });
+});

@@ -284,15 +284,10 @@ export function PublishDialog({
                   onClick={() => onDest(id)}
                 >
                   <span className="dest-name">
-                    {destinations[id].label}
+                    {id === 'preview' ? 'Preview' : 'Publish live'}
                     {id === 'preview' && !everPublishedLive && <em> · suggested</em>}
                   </span>
                   <span className="dest-url">{destinations[id].url}</span>
-                  <span className="dest-why">
-                    {id === 'preview'
-                      ? 'A copy nobody is linked to, hidden from search. Your changes stay queued afterwards, so you can look and then publish for real.'
-                      : 'The real site, visible to everyone. Publishing here clears your queue.'}
-                  </span>
                 </button>
               ))}
             </div>
@@ -338,7 +333,13 @@ export function PublishDialog({
 
       {phase !== 'review' && (
         <div className="stack">
-          <h2>{phase === 'running' ? 'Publishing' : outcome === 'failed' ? 'Nothing was published' : outcome === 'queued' ? 'Checked — not sent' : 'Published'}</h2>
+          <h2>
+            {phase === 'running' ? 'Publishing'
+              : outcome === 'failed' ? 'Nothing was published'
+              : outcome === 'queued' ? 'Checked — not sent'
+              : target && !target.isLive ? 'Published to the preview'
+              : 'Published to the live site'}
+          </h2>
 
           <div>
             {steps.map((s) => (
@@ -363,19 +364,26 @@ export function PublishDialog({
             <div className="stack" style={{ gap: 8 }}>
               {/* The push and the deployment are separate facts. Saying the site
                   is live before observing it is the same lie as claiming a save
-                  that never happened. */}
+                  that never happened. One line, from one source: `detail` knows
+                  which page was checked, so nothing here needs to guess and
+                  nothing restates it. */}
               <div className={`step ${deploy?.state === 'verified' ? 'done' : 'active'}`}>
                 <span className="mark" />
                 <span className="txt">
-                  {deploy?.state === 'verified'
-                    ? `${target && !target.isLive ? 'The preview' : 'The live site'} is serving your change`
-                    : deploy?.state === 'unknown' ? 'Could not check the page'
-                    : 'Checking the page…'}
+                  {deploy?.detail ?? 'The commit is on GitHub. Watching for the rebuild.'}
                 </span>
               </div>
-              <p style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
-                {deploy?.detail ?? 'The commit is on GitHub. Watching for the rebuild to appear.'}
-              </p>
+
+              {/* Answers the question the badge raises. It still reads 1 because
+                  the edit really is still unpublished — the live page has not
+                  changed — and that is the point of staging, not a stuck count. */}
+              {target && !target.isLive && (
+                <p style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
+                  Your live site has not changed, so your edits stay queued — the
+                  count in the corner is still counting them. Publish again and
+                  choose <b>Publish live</b> when you want them on the real site.
+                </p>
+              )}
             </div>
           )}
           {phase === 'done' && outcome === 'queued' && (

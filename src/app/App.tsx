@@ -399,6 +399,7 @@ export function App() {
       void verifyDeployment({
         liveUrl: result.destination.url,
         expected: result.fileText,
+        subject: result.destination.isLive ? 'the live site' : 'the preview',
         onProgress: ed.setDeploy,
       }).then(ed.setDeploy);
     }

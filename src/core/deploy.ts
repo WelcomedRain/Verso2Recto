@@ -30,6 +30,12 @@ export interface VerifyOptions {
   liveUrl: string;
   /** The exact bytes we published. */
   expected: string;
+  /**
+   * What to call the page being checked, e.g. "the preview". Defaults to the
+   * live site. Every message this function produces goes through it, so a
+   * publish aimed elsewhere cannot report back about a page it never touched.
+   */
+  subject?: string;
   /** Total time to keep watching before reporting `pending`. */
   timeoutMs?: number;
   intervalMs?: number;
@@ -54,6 +60,11 @@ const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 export async function verifyDeployment(opts: VerifyOptions): Promise<DeployObservation> {
   const {
     liveUrl, expected,
+    // What is being checked. A publish can target a staged copy, and saying
+    // "the live site is serving your change" when the live page was never
+    // touched is not a wording slip — it is the app asserting something false
+    // about the one page it exists to protect.
+    subject = 'the live site',
     timeoutMs = 120_000,
     intervalMs = 6_000,
     signal,
@@ -61,17 +72,18 @@ export async function verifyDeployment(opts: VerifyOptions): Promise<DeployObser
     fetchImpl = fetch,
     sleepImpl = defaultSleep,
   } = opts;
+  const Subject = subject.charAt(0).toUpperCase() + subject.slice(1);
 
   const started = Date.now();
   let attempts = 0;
   let last: DeployObservation = {
-    state: 'pending', detail: 'Waiting for the live site to rebuild.',
+    state: 'pending', detail: `Waiting for ${subject} to rebuild.`,
     checkedAt: started, attempts: 0,
   };
 
   while (Date.now() - started < timeoutMs) {
     if (signal?.aborted) {
-      return { ...last, state: 'unknown', detail: 'Stopped before the live site was checked.' };
+      return { ...last, state: 'unknown', detail: `Stopped before ${subject} was checked.` };
     }
     attempts++;
 
@@ -84,21 +96,21 @@ export async function verifyDeployment(opts: VerifyOptions): Promise<DeployObser
       if (!res.ok) {
         last = {
           state: 'pending', attempts, checkedAt: Date.now(),
-          detail: `The live site answered ${res.status}.`,
+          detail: `${Subject} answered ${res.status}.`,
         };
       } else {
         const text = await res.text();
         if (text === expected) {
           const done: DeployObservation = {
             state: 'verified', attempts, checkedAt: Date.now(),
-            detail: 'The live site is serving your change.',
+            detail: `${Subject} is serving your change.`,
           };
           onProgress?.(done);
           return done;
         }
         last = {
           state: 'stale', attempts, checkedAt: Date.now(),
-          detail: 'The live site is still serving the previous version.',
+          detail: `${Subject} is still serving the previous version.`,
         };
       }
     } catch {
@@ -106,7 +118,7 @@ export async function verifyDeployment(opts: VerifyOptions): Promise<DeployObser
       // succeeded. Report it as unobserved, not as a failed deployment.
       last = {
         state: 'unknown', attempts, checkedAt: Date.now(),
-        detail: 'Could not reach the live site to check it.',
+        detail: `Could not reach ${subject} to check it.`,
       };
     }
 
@@ -118,8 +130,8 @@ export async function verifyDeployment(opts: VerifyOptions): Promise<DeployObser
     ...last,
     state: last.state === 'verified' ? 'verified' : 'pending',
     detail: last.state === 'unknown'
-      ? 'Could not reach the live site. The push itself succeeded.'
-      : 'The live site has not picked up the change yet. It usually takes a minute.',
+      ? `Could not reach ${subject}. The push itself succeeded.`
+      : `${Subject} has not picked up the change yet. It usually takes a minute.`,
   };
 }
 

@@ -34,16 +34,52 @@ export class GitHubError extends Error {
   }
 }
 
-function friendly(status: number, body: string): string {
+/**
+ * GitHub's own words, when the body carries them.
+ *
+ * The response body was already being captured and then dropped before it
+ * reached anyone, leaving only our reading of the status code. A 403 has more
+ * than one cause, so the guess can be confidently wrong — quoting the API
+ * alongside it costs nothing and settles which cause it was.
+ */
+function githubSays(body: string): string | null {
+  try {
+    const m = (JSON.parse(body) as { message?: unknown }).message;
+    return typeof m === 'string' && m.trim() ? m.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function withSaid(text: string, body: string): string {
+  const said = githubSays(body);
+  return said ? `${text} GitHub said: “${said}”.` : text;
+}
+
+export function friendly(status: number, body: string): string {
   switch (status) {
     case 401:
-      return 'GitHub rejected the token. It may have expired, or been revoked.';
+      return withSaid('GitHub rejected the token. It may have expired, or been revoked.', body);
     case 403:
-      return body.includes('rate limit')
-        ? 'GitHub rate limit reached. Wait a few minutes and try again.'
-        : 'The token does not have permission to do that. It needs Contents: read and write on this repository.';
+      if (body.includes('rate limit')) {
+        return 'GitHub rate limit reached. Wait a few minutes and try again.';
+      }
+      // Says what is certain — it cannot write — then both things that cause
+      // it. The second is the one people miss: the "Public repositories"
+      // preset is read-only and cannot be granted write at all, so it reads
+      // perfectly and refuses every push.
+      return withSaid(
+        'The token cannot write to this repository. Check two things on it: that '
+        + 'Repository access lists this repository (the “Public repositories” preset '
+        + 'is read-only and cannot be given write), and that Contents is set to '
+        + 'Read and write.',
+        body,
+      );
     case 404:
-      return 'Not found. Check the repository name, the branch, and that the token can see this repository.';
+      return withSaid(
+        'Not found. Check the repository name, the branch, and that the token can see this repository.',
+        body,
+      );
     case 409:
       return 'The branch moved while publishing. Fetch the latest and try again.';
     case 422:
